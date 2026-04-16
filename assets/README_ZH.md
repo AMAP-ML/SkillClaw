@@ -4,8 +4,6 @@
 
 # ✨ SkillClaw: Let Skills Evolve Collectively with Agentic Evolver ✨
 
-<img src="./skillclaw_main.png" alt="SkillClaw 架构图" width="680">
-
 <h3>让分布式 AI Agent 群体在真实部署中持续进化 —— 只需对话。<br>经验自动提取，技能持续生长，集体智慧即时共享。</h3>
 
 | 🚀 安装快捷 | 💬 只需对话 | 🔌 广泛兼容 | 🧬 技能群体进化 |
@@ -13,7 +11,7 @@
 
 [![Hermes](https://img.shields.io/badge/Hermes-supported-ff6b6b?style=flat-square&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyTDIgN2wxMCA1IDEwLTV6TTIgMTdsOSA1VjEyTDIgN3pNMTMgMjJsOS01VjdMMTMgMTJ6Ii8+PC9zdmc+)](https://github.com/NousResearch/hermes-agent)
 [![OpenClaw](https://img.shields.io/badge/OpenClaw-supported-6c5ce7?style=flat-square)](https://github.com/openclaw/openclaw)
-[![Agents](https://img.shields.io/badge/+CoPaw%20%7C%20IronClaw%20%7C%20PicoClaw%20%7C%20ZeroClaw%20%7C%20...-8A2BE2?style=flat-square)](https://github.com/AMAP-ML/SkillClaw)
+[![Agents](https://img.shields.io/badge/+QwenPaw%20%7C%20IronClaw%20%7C%20PicoClaw%20%7C%20ZeroClaw%20%7C%20...-8A2BE2?style=flat-square)](https://github.com/AMAP-ML/SkillClaw)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](../LICENSE)
 [![Paper](https://img.shields.io/badge/Paper-arXiv-b5212f.svg?style=flat-square&logo=arxiv)](https://arxiv.org/abs/2604.08377)
@@ -23,7 +21,7 @@
 
 <br>
 
-<a href="https://github.com/AMAP-ML/SkillClaw"><img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=600&size=18&duration=2500&pause=1000&color=58A6FF&center=true&vCenter=true&width=750&lines=AI+Agent+%E6%8A%80%E8%83%BD%E7%BE%A4%E4%BD%93%E8%BF%9B%E5%8C%96%E6%A1%86%E6%9E%B6;Hermes+%C2%B7+OpenClaw+%C2%B7+CoPaw+%C2%B7+IronClaw+%C2%B7+PicoClaw+%C2%B7+ZeroClaw+%E7%AD%89" alt="Typing SVG" /></a>
+<a href="https://github.com/AMAP-ML/SkillClaw"><img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=600&size=18&duration=2500&pause=1000&color=58A6FF&center=true&vCenter=true&width=750&lines=AI+Agent+%E6%8A%80%E8%83%BD%E7%BE%A4%E4%BD%93%E8%BF%9B%E5%8C%96%E6%A1%86%E6%9E%B6;Hermes+%C2%B7+OpenClaw+%C2%B7+QwenPaw+%C2%B7+IronClaw+%C2%B7+PicoClaw+%C2%B7+ZeroClaw+%E7%AD%89" alt="Typing SVG" /></a>
 
 <img src="./terminal_cmd.svg" alt="skillclaw setup && skillclaw start --daemon" width="620">
 
@@ -42,7 +40,7 @@
 </tr>
 <tr>
 <td>🔌 <b>广泛兼容</b></td>
-<td>无缝支持 <a href="https://github.com/NousResearch/hermes-agent">Hermes</a>、<a href="https://github.com/openclaw/openclaw">OpenClaw</a>、CoPaw、IronClaw、PicoClaw、ZeroClaw、NanoClaw、NemoClaw 及任何 OpenAI 兼容 API。</td>
+<td>无缝支持 <a href="https://github.com/NousResearch/hermes-agent">Hermes</a>、<a href="https://github.com/openclaw/openclaw">OpenClaw</a>、QwenPaw、IronClaw、PicoClaw、ZeroClaw、NanoClaw、NemoClaw 及任何 OpenAI 兼容 API。</td>
 </tr>
 <tr>
 <td>🧬 <b>技能群体进化</b></td>
@@ -65,6 +63,14 @@
 <img src="./skill_evolution.svg" alt="技能进化流程" width="860">
 
 **N 个用户，一个 Skill，持续进化。** Every conversation compounds. Every user contributes.
+
+</div>
+
+---
+
+<div align="center">
+
+<img src="./skillclaw_main.png" alt="SkillClaw 架构图" width="680">
 
 </div>
 

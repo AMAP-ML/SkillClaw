@@ -5,7 +5,7 @@ Claw adapter: auto-configures the active CLI agent to use the SkillClaw proxy.
 Supported agents:
   openclaw  — runs `openclaw config set …` + `openclaw gateway restart`
   hermes    — patches ~/.hermes/config.yaml to point model traffic at SkillClaw
-  copaw     — patches ~/.copaw/config.json, triggers daemon hot-reload
+  qwenpaw   — patches QwenPaw model config, selects SkillClaw as active model
   ironclaw  — patches ~/.ironclaw/.env, runs `ironclaw service restart`
   picoclaw  — patches ~/.picoclaw/config.json model_list, runs `picoclaw gateway restart`
   zeroclaw  — patches ~/.zeroclaw/config.toml, runs `zeroclaw service restart`
@@ -118,6 +118,28 @@ def _load_yaml_mapping(path: Path, label: str) -> dict:
     return {}
 
 
+def _load_json_mapping(path: Path, label: str) -> dict:
+    """Load a JSON mapping, falling back to an empty mapping."""
+    if not path.exists():
+        return {}
+
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8")) or {}
+    except Exception as e:
+        logger.warning("[ClawAdapter] Failed to read %s config %s: %s", label, path, e)
+        return {}
+
+    if isinstance(loaded, dict):
+        return loaded
+
+    logger.warning(
+        "[ClawAdapter] %s config %s is not a mapping; replacing it",
+        label,
+        path,
+    )
+    return {}
+
+
 def _write_yaml_mapping_atomic(path: Path, data: dict, label: str) -> None:
     """Atomically write a YAML mapping to disk."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -133,6 +155,33 @@ def _write_yaml_mapping_atomic(path: Path, data: dict, label: str) -> None:
         ) as handle:
             tmp_path = Path(handle.name)
             yaml.safe_dump(data, handle, sort_keys=False, allow_unicode=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+        logger.info("[ClawAdapter] %s config updated: %s", label, path)
+    except Exception as e:
+        logger.error("[ClawAdapter] Failed to write %s config %s: %s", label, path, e)
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+
+
+def _write_json_mapping_atomic(path: Path, data: dict, label: str) -> None:
+    """Atomically write a JSON mapping to disk."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            delete=False,
+        ) as handle:
+            tmp_path = Path(handle.name)
+            json.dump(data, handle, indent=2, ensure_ascii=False)
+            handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp_path, path)
@@ -168,52 +217,113 @@ def _configure_hermes(cfg: "SkillClawConfig") -> None:
 
 
 # ------------------------------------------------------------------ #
-# CoPaw adapter                                                       #
+# QwenPaw adapter                                                     #
 # ------------------------------------------------------------------ #
 
-def _configure_copaw(cfg: "SkillClawConfig") -> None:
-    """Auto-configure CoPaw to use the SkillClaw proxy.
+def _get_qwenpaw_env(key: str, default: str = "") -> str:
+    """Look up a QwenPaw env var."""
+    if key in os.environ:
+        return str(os.environ[key])
+    return default
 
-    Patches ~/.copaw/config.json to set the default model provider to
-    the SkillClaw OpenAI-compatible endpoint.  CoPaw's ConfigWatcher will
-    hot-reload the file automatically; we also attempt a daemon restart
-    as a fallback for instant effect.
+
+def _resolve_qwenpaw_dirs() -> tuple[Path, Path]:
+    """Resolve QwenPaw working/secret directories."""
+    working_dir = Path(
+        _get_qwenpaw_env("QWENPAW_WORKING_DIR", "~/.qwenpaw"),
+    ).expanduser().resolve()
+    secret_dir = Path(
+        _get_qwenpaw_env("QWENPAW_SECRET_DIR", f"{working_dir}.secret"),
+    ).expanduser().resolve()
+    return working_dir, secret_dir
+
+
+def _upsert_model_info(models: object, model_id: str) -> list[dict[str, object]]:
+    """Ensure a model list contains the SkillClaw proxy model."""
+    normalized: list[dict[str, object]] = []
+    if isinstance(models, list):
+        for item in models:
+            if isinstance(item, dict):
+                normalized.append(dict(item))
+
+    for model in normalized:
+        if str(model.get("id", "")).strip() == model_id:
+            model["name"] = model.get("name") or model_id
+            return normalized
+
+    normalized.append({"id": model_id, "name": model_id})
+    return normalized
+
+
+def _configure_qwenpaw(cfg: "SkillClawConfig") -> None:
+    """Auto-configure QwenPaw to use the SkillClaw proxy.
+
+    QwenPaw stores model provider state under ``<secret>/providers`` while
+    its app config lives in ``<working>/config.json``. Update both shapes so
+    SkillClaw can point QwenPaw at the local proxy in one step.
     """
-    config_path = Path.home() / ".copaw" / "config.json"
+    working_dir, secret_dir = _resolve_qwenpaw_dirs()
+    config_path = working_dir / "config.json"
+    provider_path = secret_dir / "providers" / "builtin" / "qwenpaw-local.json"
+    active_model_path = secret_dir / "providers" / "active_model.json"
     model_id = cfg.served_model_name or cfg.llm_model_id or "skillclaw-model"
+    api_key = cfg.proxy_api_key or "skillclaw"
+    base_url = f"http://127.0.0.1:{cfg.proxy_port}/v1"
 
-    # Load existing config or start fresh
-    data: dict = {}
-    if config_path.exists():
-        try:
-            data = json.loads(config_path.read_text(encoding="utf-8"))
-        except Exception as e:
-            logger.warning("[ClawAdapter] Failed to read %s: %s", config_path, e)
-
-    # Inject SkillClaw as the default model provider
-    if not isinstance(data.get("models"), dict):
-        data["models"] = {}
-    data["models"]["default"] = {
+    # Keep the app config aligned with the provider selection.
+    config_data = _load_json_mapping(config_path, "QwenPaw")
+    if not isinstance(config_data.get("models"), dict):
+        config_data["models"] = {}
+    config_data["models"]["default"] = {
         "provider": "openai_compatible",
         "model": model_id,
-        "api_key": cfg.proxy_api_key or "skillclaw",
-        "base_url": f"http://127.0.0.1:{cfg.proxy_port}/v1",
+        "api_key": api_key,
+        "base_url": base_url,
     }
+    _write_json_mapping_atomic(config_path, config_data, "QwenPaw")
 
-    try:
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-        logger.info("[ClawAdapter] CoPaw config updated: %s", config_path)
-    except Exception as e:
-        logger.error("[ClawAdapter] Failed to write %s: %s", config_path, e)
-        return
+    # Current QwenPaw provider storage.
+    provider_data = _load_json_mapping(provider_path, "QwenPaw provider")
+    provider_data["id"] = "qwenpaw-local"
+    provider_data["name"] = "QwenPaw Local"
+    provider_data["chat_model"] = str(
+        provider_data.get("chat_model") or "OpenAIChatModel",
+    )
+    provider_data["base_url"] = base_url
+    provider_data["api_key"] = api_key
+    provider_data["api_key_prefix"] = str(provider_data.get("api_key_prefix") or "")
+    provider_data["is_local"] = True
+    provider_data["freeze_url"] = False
+    provider_data["require_api_key"] = False
+    provider_data["is_custom"] = False
+    provider_data["support_model_discovery"] = bool(
+        provider_data.get("support_model_discovery", False),
+    )
+    provider_data["support_connection_check"] = bool(
+        provider_data.get("support_connection_check", True),
+    )
+    provider_data["generate_kwargs"] = (
+        provider_data["generate_kwargs"]
+        if isinstance(provider_data.get("generate_kwargs"), dict)
+        else {}
+    )
+    provider_data["meta"] = (
+        provider_data["meta"] if isinstance(provider_data.get("meta"), dict) else {}
+    )
+    provider_data["models"] = (
+        provider_data["models"] if isinstance(provider_data.get("models"), list) else []
+    )
+    provider_data["extra_models"] = _upsert_model_info(
+        provider_data.get("extra_models"),
+        model_id,
+    )
+    _write_json_mapping_atomic(provider_path, provider_data, "QwenPaw provider")
 
-    # Hot-reload: CoPaw's ConfigWatcher picks up the file change automatically.
-    # Also attempt `copaw daemon restart` for immediate effect (ignore if not running).
-    _run_commands("copaw", [["copaw", "daemon", "restart"]], ignore_missing=True)
+    active_model = {"provider_id": "qwenpaw-local", "model": model_id}
+    _write_json_mapping_atomic(active_model_path, active_model, "QwenPaw active model")
+
+    # Best-effort reload for the current CLI.
+    _run_commands("qwenpaw", [["qwenpaw", "daemon", "restart"]], ignore_missing=True)
 
 
 # ------------------------------------------------------------------ #
@@ -622,7 +732,7 @@ def _configure_none(cfg: "SkillClawConfig") -> None:
 _ADAPTERS: dict[str, Callable[["SkillClawConfig"], None]] = {
     "openclaw": _configure_openclaw,
     "hermes": _configure_hermes,
-    "copaw": _configure_copaw,
+    "qwenpaw": _configure_qwenpaw,
     "ironclaw": _configure_ironclaw,
     "picoclaw": _configure_picoclaw,
     "zeroclaw": _configure_zeroclaw,

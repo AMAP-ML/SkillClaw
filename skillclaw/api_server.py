@@ -1190,7 +1190,7 @@ class SkillClawAPIServer:
             int(getattr(config, "shutdown_drain_timeout_seconds", _SHUTDOWN_DRAIN_TIMEOUT_SECONDS)),
         )
 
-        # Session boundary detection for non-OpenClaw agents (CoPaw, IronClaw, etc.)
+        # Session boundary detection for non-OpenClaw agents (QwenPaw, IronClaw, etc.)
         # Maps pseudo-session key (e.g. "tui-model") to tracking metadata.
         self._tui_session_meta: dict[str, dict] = {}
         _INACTIVITY_TIMEOUT = 300  # seconds — treat as new session after 5 min idle
@@ -1301,7 +1301,7 @@ class SkillClawAPIServer:
                 rewritten = 0
             _raw_sid = x_session_id or body.get("session_id") or ""
             # OpenClaw sends X-Session-Id/X-Turn-Type on every request.
-            # Non-OpenClaw agents (CoPaw, IronClaw, etc.) don't — detect
+            # Non-OpenClaw agents (QwenPaw, IronClaw, etc.) don't — detect
             # session boundaries heuristically so session upload and state
             # cleanup still work correctly.
             if _raw_sid:
@@ -1523,7 +1523,7 @@ class SkillClawAPIServer:
         return age >= max(0, int(idle_after_seconds))
 
     # ------------------------------------------------------------------ #
-    # TUI session boundary detection (CoPaw / IronClaw / generic clients)  #
+    # TUI session boundary detection (QwenPaw / IronClaw / generic clients) #
     # ------------------------------------------------------------------ #
 
     async def _resolve_tui_session(self, model: str, msg_count: int) -> str:

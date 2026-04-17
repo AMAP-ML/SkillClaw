@@ -4,7 +4,7 @@
 
 # ✨ SkillClaw: Let Skills Evolve Collectively with Agentic Evolver ✨
 
-<h3>让分布式 AI Agent 群体在真实部署中持续进化 —— 只需对话。<br>经验自动提取，技能持续生长，集体智慧即时共享。</h3>
+<h3>让 AI Agent 技能从每一次真实交互中自动进化 —— 只需对话。<br>跨会话、跨 Agent、跨设备、跨用户，经验持续累积，技能群体进化。</h3>
 
 | 🚀 安装快捷 | 💬 只需对话 | 🔌 广泛兼容 | 🧬 技能群体进化 |
 |:-:|:-:|:-:|:-:|
@@ -44,7 +44,7 @@
 </tr>
 <tr>
 <td>🧬 <b>技能群体进化</b></td>
-<td>多用户、多 Agent 的实战经验自动提炼为可复用 Skill，通过云端共享，让整个 Agent 集群持续进化。</td>
+<td>技能从每一次对话、每一个 Agent、每一个场景中进化。单人或团队，进化闭环完全一致。每一份经验都在累积。</td>
 </tr>
 </table>
 
@@ -52,17 +52,61 @@
 
 <div align="center">
 
-### 从经验孤岛到群体进化
+## SkillClaw 给一个 Hermes 用户带来了什么
+
+</div>
+
+Hermes 用久了，技能库是不是一锅乱炖？重复的、过时的、半成品的全挤在一起，像没人整理的掉落箱。问题不是学得不够多，而是没人帮它"消化"。
+
+**SkillClaw 就是干这个的。** 自动进化、自动去重、自动提质。不改变你的使用方式，不打断你的节奏，只是悄悄改写 Agent 的成长曲线。
+
+SkillClaw 不是让 Hermes 学更多，而是让它学到的一切，真正变成战斗力。
+
+<div align="center">
+
+<img src="./two_loops.svg" alt="双循环：Hermes 任务期循环 + SkillClaw 任务后进化循环" width="860">
+
+</div>
+
+这只是一个人的故事。一个用户也可以跑多个 Agent、用多台设备，SkillClaw 把它们全部统一：
+
+<div align="center">
+
+### 多个 Agent？统一技能库。
+
+<img src="./multiplier_effect.svg" alt="乘数效应：多个 Hermes Agent 通过 SkillClaw 共享技能" width="860">
+
+</div>
+
+同时运行多个 Hermes Agent 做不同任务？没有 SkillClaw，每个 Agent 都在建自己的技能孤岛。有了 SkillClaw，技能会被**合并、去重、交叉融合**成一个统一技能库，再分发给所有 Agent。前端 Agent 的 React 技能让后端 Agent 的 API 设计更好——反之亦然。
+
+<div align="center">
+
+### 多台设备？技能跟着你走，不跟机器走。
+
+<img src="./cross_context.svg" alt="无缝场景：家里、学校、公司的 Hermes 通过 SkillClaw 统一" width="860">
+
+</div>
+
+同一个人，不同机器。你家里的 Hermes 学了 React，学校的 Hermes 学了 ML，公司的 Hermes 学了 K8s。没有 SkillClaw，每台机器都从零开始。有了它，**技能跨环境统一**——每个 Hermes 实例都受益于其他所有环境的经验，不管你在哪里。
+
+---
+
+<div align="center">
+
+## 技能群体进化
+
+</div>
+
+以上都是一个用户能获得的。现在放大：加入共享群组后，**每个成员的实战经验都汇入同一个进化循环**。用户 A 调试了一个数据库问题——技能进化了。用户 B、C、D 立刻受益，根本不用自己再踩一遍。N 个用户，一个 Skill，持续进化。
+
+<div align="center">
 
 <img src="./shift_contrast.svg" alt="从经验孤岛到群体进化" width="860">
 
 <br>
 
-### 四个人的经验，一个 Skill 的进化
-
-<img src="./skill_evolution.svg" alt="技能进化流程" width="860">
-
-**N 个用户，一个 Skill，持续进化。** Every conversation compounds. Every user contributes.
+<img src="./skill_evolution.svg" alt="技能进化流程：一个技能如何在多个用户之间进化" width="860">
 
 </div>
 
@@ -88,13 +132,13 @@
 
 ## 项目概览
 
-SkillClaw 通过从真实会话数据中**演化可复用技能**并在一组 Agent 之间共享，让 LLM Agent 持续变强。
+SkillClaw 通过从真实会话数据中**演化可复用技能**，让 LLM Agent 持续变强。一个人用就已经有效——技能会在每次会话间自动去重、提质、验证。准备好了就往上扩：多个 Agent、多台设备、多个用户，都能汇入同一个进化循环。
 
 系统由两个部分组成：
 
-1. **Client Proxy** — 本地 API 代理（`/v1/chat/completions`、`/v1/messages`），负责拦截 Agent 请求、记录会话产物，并与共享存储同步技能。
+1. **Client Proxy** — 本地 API 代理（`/v1/chat/completions`、`/v1/messages`），负责拦截 Agent 请求、记录会话产物，并管理你的本地技能库。只装这个就能用起来。
 
-2. **Evolve Server**（`evolve_server`）— 统一的技能演化服务，从共享存储读取会话数据，演化或创建技能，再写回存储。它支持两种 engine：
+2. **Evolve Server**（`evolve_server`）— 可选的技能演化服务，从共享存储读取会话数据，演化或创建技能，再写回存储。当你需要自动演化或团队共享时再加。它支持两种 engine：
    - `workflow`：固定三阶段 LLM 流程（Summarize → Aggregate → Execute）
    - `agent`：基于 OpenClaw 的自主 agent 工作区，直接编辑技能文件
 
@@ -104,13 +148,12 @@ SkillClaw 通过从真实会话数据中**演化可复用技能**并在一组 Ag
 
 ## 部署模型
 
-可以把 SkillClaw 理解成"每个用户一个 Client，每个群组一个 Evolver"：
+先装 Client，需要时再加 Server。
 
-1. 每个用户都在自己的机器上运行本地 `skillclaw` Client Proxy。
-2. 每个共享群组通常只运行一个 `skillclaw-evolve-server`。
-3. 用户侧和服务器侧只通过共享存储（`local`、`oss`、`s3`）发生连接。
+1. **单用户 + 自动演化**：装好 Client Proxy，再在同一台机器（或任何能访问存储的地方）加一个 Evolve Server，让技能在后台自动精炼。
+2. **团队 / 共享群组**：多个 Client 指向同一个共享存储，群组运行一个 `skillclaw-evolve-server`。所有人的经验汇入同一个进化循环。
 
-这个拆分是最适合初学者的理解方式：
+Client 和 Server 只通过共享存储（`local`、`oss`、`s3`）发生连接。这意味着：
 
 - 如果你只是自己用，先装 Client 就够了，后面再决定要不要加 Evolver。
 - 如果你是加入一个现有群组，你仍然只需要安装 Client，不需要在自己机器上跑 Evolver。
@@ -164,7 +207,7 @@ skillclaw setup
 第一次最小化验证时，推荐这样选：
 
 - `CLI agent` 选 `none`，先不要自动改外部 agent 配置
-- `skills` 目录保持默认值 `~/.skillclaw/skills`
+- `skills` 目录保持默认值 `~/.skillclaw/skills`；如果你选了 Hermes，默认技能库会变成 `~/.hermes/skills`
 - 如果你只是想先验证代理能不能正常用，可以先关闭 shared storage
 - 如果你后面想在同一台机器上继续跑本地 evolver 闭环，就把 shared storage 打开并选 `local` backend，例如 `~/.skillclaw/local-share`
 - 如果你想先把成本压到最低，可以先关闭 PRM
@@ -192,6 +235,8 @@ curl "http://127.0.0.1:${PROXY_PORT}/healthz"
 2. 运行 `skillclaw setup`，在 `CLI agent to configure` 里选择 `hermes`。
 3. `Proxy model name exposed to agents` 保持 `skillclaw-model`，除非你明确知道自己为什么要改它。
 4. 启动 SkillClaw。启动时，SkillClaw 会自动改写 `~/.hermes/config.yaml`，把 Hermes 指到本地代理。
+5. Hermes 默认使用 `~/.hermes/skills` 作为本地技能库。SkillClaw 会自动准备好该目录，并把 `~/.skillclaw/skills` 中遗留的旧技能复制过来。
+6. 如果你想检查或撤销集成，使用 `skillclaw doctor hermes` 和 `skillclaw restore hermes`。
 
 最小验证命令：
 
@@ -199,6 +244,15 @@ curl "http://127.0.0.1:${PROXY_PORT}/healthz"
 skillclaw start --daemon
 hermes chat -Q -m skillclaw-model -q "Reply with exactly HERMES_SKILLCLAW_OK and nothing else."
 ```
+
+可选诊断命令：
+
+```bash
+skillclaw doctor hermes
+skillclaw restore hermes
+```
+
+`skillclaw doctor hermes` 会检查 Hermes 是否指向了本地代理、Hermes skills 目录是否存在、旧技能是否还在、以及会话边界是否仍回退到代理侧的启发式策略（除非 Hermes 发送了显式的 session header）。
 
 ### 路径 B：加入一个已有的共享群组
 

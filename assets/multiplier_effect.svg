@@ -1,0 +1,224 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 780" width="960" height="780">
+  <defs>
+    <linearGradient id="titleGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#D44040"/>
+      <stop offset="100%" stop-color="#4A90D4"/>
+    </linearGradient>
+    <linearGradient id="dividerGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="20%" stop-color="#F0CDCB"/>
+      <stop offset="50%" stop-color="#E2E8F0"/>
+      <stop offset="80%" stop-color="#B8D4F0"/>
+      <stop offset="100%" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <linearGradient id="libGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#D4E8FA"/>
+      <stop offset="100%" stop-color="#C2D9F0"/>
+    </linearGradient>
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <style>
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
+    @keyframes corePulse{0%,100%{opacity:.85}50%{opacity:1}}
+    @keyframes flowDown{0%{stroke-dashoffset:20}100%{stroke-dashoffset:0}}
+    @keyframes flowRight{0%{stroke-dashoffset:16}100%{stroke-dashoffset:0}}
+    .pulse{animation:pulse 2.5s ease-in-out infinite}
+    .core-pulse{animation:corePulse 3s ease-in-out infinite}
+    .flow-down{stroke-dasharray:6 4;animation:flowDown .8s linear infinite}
+    .flow-right{stroke-dasharray:5 3;animation:flowRight .6s linear infinite}
+  </style>
+
+  <rect width="960" height="780" rx="18" fill="#FFFFFF"/>
+  <rect width="960" height="780" rx="18" fill="none" stroke="#E2E8F0" stroke-width="1"/>
+
+  <!-- TITLE -->
+  <text x="480" y="42" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="18" font-weight="800" letter-spacing="6" fill="url(#titleGrad)">THE MULTIPLIER EFFECT</text>
+  <text x="480" y="76" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="26" font-weight="900" fill="#0F172A">Multiple Hermes, One Collective Intelligence</text>
+  <rect x="50" y="92" width="860" height="2" rx="1" fill="url(#dividerGrad)"/>
+
+  <!-- ===== TOP ROW: 4 HERMES AGENTS ===== -->
+  <!-- Agent A -->
+  <rect x="50" y="112" width="200" height="100" rx="12" fill="#FEF7F7" stroke="#F0CDCB" stroke-width="1.2"/>
+  <g transform="translate(66, 120)"><circle cx="12" cy="12" r="12" fill="#FCEAEA" stroke="#E8A0A0" stroke-width="1.2"/><path d="M13,4 L9,12 L12,12 L11,20 L15,10 L12,10 Z" fill="#D44040"/></g>
+  <text x="96" y="138" font-family="Inter,-apple-system,sans-serif" font-size="16" font-weight="800" fill="#B5302A">Hermes A</text>
+  <text x="66" y="158" font-family="Inter,-apple-system,sans-serif" font-size="14" fill="#C0392B">Frontend Dev</text>
+  <rect x="66" y="172" width="168" height="28" rx="6" fill="#FFF" stroke="#E8A0A0" stroke-width="1" class="pulse"/>
+  <rect x="76" y="179" width="50" height="10" rx="3" fill="#FCEAEA"/>
+  <text x="101" y="188" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="8" font-weight="700" fill="#D44040">skill</text>
+  <rect x="132" y="182" width="80" height="4" rx="2" fill="#F0CDCB"/>
+
+  <!-- Agent B -->
+  <rect x="270" y="112" width="200" height="100" rx="12" fill="#FEF7F7" stroke="#F0CDCB" stroke-width="1.2"/>
+  <g transform="translate(286, 120)"><circle cx="12" cy="12" r="12" fill="#FCEAEA" stroke="#E8A0A0" stroke-width="1.2"/><path d="M13,4 L9,12 L12,12 L11,20 L15,10 L12,10 Z" fill="#D44040"/></g>
+  <text x="316" y="138" font-family="Inter,-apple-system,sans-serif" font-size="16" font-weight="800" fill="#B5302A">Hermes B</text>
+  <text x="286" y="158" font-family="Inter,-apple-system,sans-serif" font-size="14" fill="#C0392B">Backend Dev</text>
+  <rect x="286" y="172" width="168" height="28" rx="6" fill="#FFF" stroke="#E8A0A0" stroke-width="1" class="pulse" style="animation-delay:.3s"/>
+  <rect x="296" y="179" width="50" height="10" rx="3" fill="#FCEAEA"/>
+  <text x="321" y="188" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="8" font-weight="700" fill="#D44040">skill</text>
+  <rect x="352" y="182" width="80" height="4" rx="2" fill="#F0CDCB"/>
+
+  <!-- Agent C -->
+  <rect x="490" y="112" width="200" height="100" rx="12" fill="#FEF7F7" stroke="#F0CDCB" stroke-width="1.2"/>
+  <g transform="translate(506, 120)"><circle cx="12" cy="12" r="12" fill="#FCEAEA" stroke="#E8A0A0" stroke-width="1.2"/><path d="M13,4 L9,12 L12,12 L11,20 L15,10 L12,10 Z" fill="#D44040"/></g>
+  <text x="536" y="138" font-family="Inter,-apple-system,sans-serif" font-size="16" font-weight="800" fill="#B5302A">Hermes C</text>
+  <text x="506" y="158" font-family="Inter,-apple-system,sans-serif" font-size="14" fill="#C0392B">DevOps</text>
+  <rect x="506" y="172" width="168" height="28" rx="6" fill="#FFF" stroke="#E8A0A0" stroke-width="1" class="pulse" style="animation-delay:.6s"/>
+  <rect x="516" y="179" width="50" height="10" rx="3" fill="#FCEAEA"/>
+  <text x="541" y="188" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="8" font-weight="700" fill="#D44040">skill</text>
+  <rect x="572" y="182" width="80" height="4" rx="2" fill="#F0CDCB"/>
+
+  <!-- Agent D -->
+  <rect x="710" y="112" width="200" height="100" rx="12" fill="#FEF7F7" stroke="#F0CDCB" stroke-width="1.2"/>
+  <g transform="translate(726, 120)"><circle cx="12" cy="12" r="12" fill="#FCEAEA" stroke="#E8A0A0" stroke-width="1.2"/><path d="M13,4 L9,12 L12,12 L11,20 L15,10 L12,10 Z" fill="#D44040"/></g>
+  <text x="756" y="138" font-family="Inter,-apple-system,sans-serif" font-size="16" font-weight="800" fill="#B5302A">Hermes D</text>
+  <text x="726" y="158" font-family="Inter,-apple-system,sans-serif" font-size="14" fill="#C0392B">Data Analysis</text>
+  <rect x="726" y="172" width="168" height="28" rx="6" fill="#FFF" stroke="#E8A0A0" stroke-width="1" class="pulse" style="animation-delay:.9s"/>
+  <rect x="736" y="179" width="50" height="10" rx="3" fill="#FCEAEA"/>
+  <text x="761" y="188" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="8" font-weight="700" fill="#D44040">skill</text>
+  <rect x="792" y="182" width="80" height="4" rx="2" fill="#F0CDCB"/>
+
+  <!-- ===== TOP CONVERGING ARROWS: agents -> SkillClaw ===== -->
+  <!-- 4 short lines down from each agent -->
+  <line x1="150" y1="212" x2="150" y2="230" stroke="#D44040" stroke-width="2" class="flow-down"/>
+  <line x1="370" y1="212" x2="370" y2="230" stroke="#D44040" stroke-width="2" class="flow-down" style="animation-delay:.15s"/>
+  <line x1="590" y1="212" x2="590" y2="230" stroke="#D44040" stroke-width="2" class="flow-down" style="animation-delay:.3s"/>
+  <line x1="810" y1="212" x2="810" y2="230" stroke="#D44040" stroke-width="2" class="flow-down" style="animation-delay:.45s"/>
+  <!-- horizontal bus -->
+  <line x1="150" y1="230" x2="810" y2="230" stroke="#D44040" stroke-width="2" class="flow-right"/>
+  <!-- single trunk down to SkillClaw -->
+  <line x1="480" y1="230" x2="480" y2="268" stroke="#D44040" stroke-width="2.5" class="flow-down"/>
+  <polygon points="473,265 487,265 480,279" fill="#D44040"/>
+
+  <!-- ===== SKILLCLAW ZONE ===== -->
+  <rect x="140" y="282" width="680" height="170" rx="16" fill="#EBF4FF" stroke="#B8D4F0" stroke-width="1.5"/>
+
+  <g transform="translate(175, 294)"><circle cx="18" cy="18" r="18" fill="#D4E8FA" stroke="#6AAAD8" stroke-width="1.5"/><path d="M18,6 L10,10 L10,18 C10,24 14,28 18,30 C22,28 26,24 26,18 L26,10 Z" fill="none" stroke="#4A90D4" stroke-width="1.8" stroke-linejoin="round"/><path d="M14,18 L17,21 L23,14" fill="none" stroke="#4A90D4" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></g>
+
+  <text x="224" y="316" font-family="Inter,-apple-system,sans-serif" font-size="22" font-weight="800" fill="#1D4E7E">SKILLCLAW</text>
+
+  <text x="400" y="316" font-family="Inter,-apple-system,sans-serif" font-size="15" fill="#4A90D4" font-weight="600">Cross-pollinate &amp; evolve all skills</text>
+
+  <text x="175" y="347" font-family="Inter,-apple-system,sans-serif" font-size="15" fill="#64748B">Merge skills from A + B + C + D, then evolve together</text>
+
+  <!-- 4-step flow -->
+  <rect x="175" y="365" width="110" height="50" rx="10" fill="#D4E8FA" stroke="#B8D4F0" stroke-width="1"/>
+  <text x="230" y="395" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="17" font-weight="800" fill="#2B6FAC">Filter</text>
+
+  <line x1="285" y1="390" x2="315" y2="390" stroke="#6AAAD8" stroke-width="2.5" class="flow-right"/>
+  <polygon points="313,384 325,390 313,396" fill="#6AAAD8"/>
+
+  <rect x="325" y="365" width="110" height="50" rx="10" fill="#D4E8FA" stroke="#B8D4F0" stroke-width="1"/>
+  <text x="380" y="395" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="17" font-weight="800" fill="#2B6FAC">Improve</text>
+
+  <line x1="435" y1="390" x2="465" y2="390" stroke="#6AAAD8" stroke-width="2.5" class="flow-right" style="animation-delay:.15s"/>
+  <polygon points="463,384 475,390 463,396" fill="#6AAAD8"/>
+
+  <rect x="475" y="365" width="110" height="50" rx="10" fill="#D4E8FA" stroke="#B8D4F0" stroke-width="1"/>
+  <text x="530" y="395" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="17" font-weight="800" fill="#2B6FAC">Verify</text>
+
+  <line x1="585" y1="390" x2="615" y2="390" stroke="#6AAAD8" stroke-width="2.5" class="flow-right" style="animation-delay:.3s"/>
+  <polygon points="613,384 625,390 613,396" fill="#6AAAD8"/>
+
+  <rect x="625" y="365" width="110" height="50" rx="10" fill="#C2D9F0" stroke="#4A90D4" stroke-width="1.5"/>
+  <text x="680" y="395" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="17" font-weight="800" fill="#1D4E7E">Solidify</text>
+
+  <text x="480" y="437" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="14" fill="#64748B">Real session data drives every step</text>
+
+  <!-- Flowing arrow down to library -->
+  <line x1="480" y1="452" x2="480" y2="490" stroke="#94A3B8" stroke-width="2.5" class="flow-down"/>
+  <polygon points="473,487 487,487 480,501" fill="#94A3B8"/>
+
+  <!-- ===== UNIFIED LIBRARY ===== -->
+  <ellipse cx="480" cy="530" rx="210" ry="30" fill="#D4E8FA" opacity=".3" class="core-pulse"/>
+  <rect x="300" y="504" width="360" height="50" rx="14" fill="url(#libGrad)" stroke="#B8D4F0" stroke-width="1.8" filter="url(#softGlow)"/>
+  <path d="M326,518 L326,534 M336,514 L336,534 M346,518 L346,534" stroke="#2B6FAC" stroke-width="2" stroke-linecap="round"/>
+  <line x1="321" y1="536" x2="351" y2="536" stroke="#2B6FAC" stroke-width="2" stroke-linecap="round"/>
+  <path d="M321,516 L336,508 L351,516" fill="none" stroke="#2B6FAC" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="510" y="526" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="18" font-weight="800" fill="#2B6FAC">Unified Skill Library</text>
+  <text x="510" y="546" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="13" font-weight="600" fill="#3A7CBD">Best of A + B + C + D &#xB7; Evolved &#xB7; Verified</text>
+
+  <!-- ===== BOTTOM DIVERGING ARROWS: Library -> agents ===== -->
+  <!-- single trunk down from library -->
+  <line x1="480" y1="554" x2="480" y2="572" stroke="#4A90D4" stroke-width="2.5" class="flow-down"/>
+  <!-- horizontal bus -->
+  <line x1="150" y1="572" x2="810" y2="572" stroke="#4A90D4" stroke-width="2" class="flow-right" style="animation-delay:.1s"/>
+  <!-- 4 short lines down to each agent -->
+  <line x1="150" y1="572" x2="150" y2="606" stroke="#4A90D4" stroke-width="2" class="flow-down" style="animation-delay:.15s"/>
+  <polygon points="143,603 157,603 150,617" fill="#4A90D4"/>
+  <line x1="370" y1="572" x2="370" y2="606" stroke="#4A90D4" stroke-width="2" class="flow-down" style="animation-delay:.25s"/>
+  <polygon points="363,603 377,603 370,617" fill="#4A90D4"/>
+  <line x1="590" y1="572" x2="590" y2="606" stroke="#4A90D4" stroke-width="2" class="flow-down" style="animation-delay:.35s"/>
+  <polygon points="583,603 597,603 590,617" fill="#4A90D4"/>
+  <line x1="810" y1="572" x2="810" y2="606" stroke="#4A90D4" stroke-width="2" class="flow-down" style="animation-delay:.45s"/>
+  <polygon points="803,603 817,603 810,617" fill="#4A90D4"/>
+
+  <!-- ===== ENRICHED AGENTS (bottom row) ===== -->
+  <!-- Agent A -->
+  <rect x="50" y="618" width="200" height="80" rx="12" fill="#F5F9FF" stroke="#B8D4F0" stroke-width="1.5"/>
+  <g transform="translate(66, 626)"><circle cx="12" cy="12" r="12" fill="#D4E8FA" stroke="#6AAAD8" stroke-width="1.2"/><path d="M13,4 L9,12 L12,12 L11,20 L15,10 L12,10 Z" fill="#6AAAD8"/></g>
+  <text x="96" y="644" font-family="Inter,-apple-system,sans-serif" font-size="14" font-weight="800" fill="#2B6FAC">Hermes A</text>
+  <text x="184" y="644" font-family="Inter,-apple-system,sans-serif" font-size="13" font-weight="700" fill="#4A90D4">4x &#x2191;</text>
+  <rect x="66" y="654" width="42" height="16" rx="4" fill="#D4E8FA" stroke="#C2D9F0" stroke-width=".8"/>
+  <text x="87" y="666" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="9" font-weight="700" fill="#4A90D4">Front</text>
+  <rect x="112" y="654" width="42" height="16" rx="4" fill="#D4E8FA" stroke="#B8D4F0" stroke-width=".8"/>
+  <text x="133" y="666" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="9" font-weight="700" fill="#2B6FAC">Back</text>
+  <rect x="158" y="654" width="42" height="16" rx="4" fill="#D4E8FA" stroke="#B8D4F0" stroke-width=".8"/>
+  <text x="179" y="666" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="9" font-weight="700" fill="#2B6FAC">Ops</text>
+  <rect x="204" y="654" width="42" height="16" rx="4" fill="#D4E8FA" stroke="#B8D4F0" stroke-width=".8"/>
+  <text x="225" y="666" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="9" font-weight="700" fill="#2B6FAC">Data</text>
+  <text x="66" y="688" font-family="Inter,-apple-system,sans-serif" font-size="11" fill="#3A7CBD">+ Backend, DevOps, Data skills</text>
+
+  <!-- Agent B -->
+  <rect x="270" y="618" width="200" height="80" rx="12" fill="#F5F9FF" stroke="#B8D4F0" stroke-width="1.5"/>
+  <g transform="translate(286, 626)"><circle cx="12" cy="12" r="12" fill="#D4E8FA" stroke="#6AAAD8" stroke-width="1.2"/><path d="M13,4 L9,12 L12,12 L11,20 L15,10 L12,10 Z" fill="#6AAAD8"/></g>
+  <text x="316" y="644" font-family="Inter,-apple-system,sans-serif" font-size="14" font-weight="800" fill="#2B6FAC">Hermes B</text>
+  <text x="404" y="644" font-family="Inter,-apple-system,sans-serif" font-size="13" font-weight="700" fill="#4A90D4">4x &#x2191;</text>
+  <rect x="286" y="654" width="42" height="16" rx="4" fill="#D4E8FA" stroke="#B8D4F0" stroke-width=".8"/>
+  <text x="307" y="666" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="9" font-weight="700" fill="#2B6FAC">Front</text>
+  <rect x="332" y="654" width="42" height="16" rx="4" fill="#D4E8FA" stroke="#C2D9F0" stroke-width=".8"/>
+  <text x="353" y="666" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="9" font-weight="700" fill="#4A90D4">Back</text>
+  <rect x="378" y="654" width="42" height="16" rx="4" fill="#D4E8FA" stroke="#B8D4F0" stroke-width=".8"/>
+  <text x="399" y="666" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="9" font-weight="700" fill="#2B6FAC">Ops</text>
+  <rect x="424" y="654" width="42" height="16" rx="4" fill="#D4E8FA" stroke="#B8D4F0" stroke-width=".8"/>
+  <text x="445" y="666" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="9" font-weight="700" fill="#2B6FAC">Data</text>
+  <text x="286" y="688" font-family="Inter,-apple-system,sans-serif" font-size="11" fill="#3A7CBD">+ Frontend, DevOps, Data skills</text>
+
+  <!-- Agent C -->
+  <rect x="490" y="618" width="200" height="80" rx="12" fill="#F5F9FF" stroke="#B8D4F0" stroke-width="1.5"/>
+  <g transform="translate(506, 626)"><circle cx="12" cy="12" r="12" fill="#D4E8FA" stroke="#6AAAD8" stroke-width="1.2"/><path d="M13,4 L9,12 L12,12 L11,20 L15,10 L12,10 Z" fill="#6AAAD8"/></g>
+  <text x="536" y="644" font-family="Inter,-apple-system,sans-serif" font-size="14" font-weight="800" fill="#2B6FAC">Hermes C</text>
+  <text x="624" y="644" font-family="Inter,-apple-system,sans-serif" font-size="13" font-weight="700" fill="#4A90D4">4x &#x2191;</text>
+  <rect x="506" y="654" width="42" height="16" rx="4" fill="#D4E8FA" stroke="#B8D4F0" stroke-width=".8"/>
+  <text x="527" y="666" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="9" font-weight="700" fill="#2B6FAC">Front</text>
+  <rect x="552" y="654" width="42" height="16" rx="4" fill="#D4E8FA" stroke="#B8D4F0" stroke-width=".8"/>
+  <text x="573" y="666" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="9" font-weight="700" fill="#2B6FAC">Back</text>
+  <rect x="598" y="654" width="42" height="16" rx="4" fill="#D4E8FA" stroke="#C2D9F0" stroke-width=".8"/>
+  <text x="619" y="666" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="9" font-weight="700" fill="#4A90D4">Ops</text>
+  <rect x="644" y="654" width="42" height="16" rx="4" fill="#D4E8FA" stroke="#B8D4F0" stroke-width=".8"/>
+  <text x="665" y="666" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="9" font-weight="700" fill="#2B6FAC">Data</text>
+  <text x="506" y="688" font-family="Inter,-apple-system,sans-serif" font-size="11" fill="#3A7CBD">+ Frontend, Backend, Data skills</text>
+
+  <!-- Agent D -->
+  <rect x="710" y="618" width="200" height="80" rx="12" fill="#F5F9FF" stroke="#B8D4F0" stroke-width="1.5"/>
+  <g transform="translate(726, 626)"><circle cx="12" cy="12" r="12" fill="#D4E8FA" stroke="#6AAAD8" stroke-width="1.2"/><path d="M13,4 L9,12 L12,12 L11,20 L15,10 L12,10 Z" fill="#6AAAD8"/></g>
+  <text x="756" y="644" font-family="Inter,-apple-system,sans-serif" font-size="14" font-weight="800" fill="#2B6FAC">Hermes D</text>
+  <text x="844" y="644" font-family="Inter,-apple-system,sans-serif" font-size="13" font-weight="700" fill="#4A90D4">4x &#x2191;</text>
+  <rect x="726" y="654" width="42" height="16" rx="4" fill="#D4E8FA" stroke="#B8D4F0" stroke-width=".8"/>
+  <text x="747" y="666" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="9" font-weight="700" fill="#2B6FAC">Front</text>
+  <rect x="772" y="654" width="42" height="16" rx="4" fill="#D4E8FA" stroke="#B8D4F0" stroke-width=".8"/>
+  <text x="793" y="666" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="9" font-weight="700" fill="#2B6FAC">Back</text>
+  <rect x="818" y="654" width="42" height="16" rx="4" fill="#D4E8FA" stroke="#B8D4F0" stroke-width=".8"/>
+  <text x="839" y="666" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="9" font-weight="700" fill="#2B6FAC">Ops</text>
+  <rect x="864" y="654" width="42" height="16" rx="4" fill="#D4E8FA" stroke="#C2D9F0" stroke-width=".8"/>
+  <text x="885" y="666" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="9" font-weight="700" fill="#4A90D4">Data</text>
+  <text x="726" y="688" font-family="Inter,-apple-system,sans-serif" font-size="11" fill="#3A7CBD">+ Frontend, Backend, Ops skills</text>
+
+  <!-- KEY INSIGHT -->
+  <rect x="160" y="714" width="640" height="50" rx="14" fill="#F5F9FF" stroke="#C2D9F0" stroke-width="1.5"/>
+  <text x="480" y="736" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="17" font-weight="800" fill="#2B6FAC">Every agent learns from every other agent's experience</text>
+  <text x="480" y="754" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="14" fill="#3A7CBD">N agents &#xD7; M tasks = N&#xD7;M skill sources &#x2192; exponential collective growth</text>
+
+</svg>

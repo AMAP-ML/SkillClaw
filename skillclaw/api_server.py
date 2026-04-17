@@ -109,6 +109,51 @@ _SESSION_SWEEP_INTERVAL_SECONDS = 15
 _SHUTDOWN_DRAIN_TIMEOUT_SECONDS = 15
 _VALID_TURN_TYPES = {"main", "side"}
 _TRUE_STRINGS = {"1", "true", "yes", "on"}
+_READ_TOOL_NAMES = {"read", "file_read", "read_file", "readfile"}
+_HERMES_SKILL_READ_TOOL_NAMES = {"skill_view"}
+_SKILL_WRITE_TOOL_NAMES = {
+    "write",
+    "file_write",
+    "write_file",
+    "writefile",
+    "create_file",
+    "edit",
+    "edit_file",
+    "replace",
+    "replace_in_file",
+    "append",
+    "append_file",
+    "patch",
+    "apply_patch",
+    "move",
+    "rename",
+    "mv",
+}
+_HERMES_SKILL_WRITE_TOOL_NAMES = {"skill_manage"}
+_SHELL_TOOL_NAMES = {"shell", "exec", "bash", "terminal"}
+_PATCH_PATH_RE = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", re.MULTILINE)
+_SHELL_SKILL_PATH_RE = re.compile(r"([~./A-Za-z0-9_\-][^\n\"'`]*?SKILL\.md)")
+
+
+def _extract_skill_names(items: list[Any] | None) -> set[str]:
+    names: set[str] = set()
+    for item in items or []:
+        if isinstance(item, dict):
+            raw = item.get("skill_name") or item.get("name") or item.get("skill")
+        else:
+            raw = item
+        name = str(raw or "").strip()
+        if name:
+            names.add(name)
+    return names
+
+
+def _extract_modified_skill_names(turns: list[dict] | None) -> set[str]:
+    names: set[str] = set()
+    for turn in turns or []:
+        if isinstance(turn, dict):
+            names.update(_extract_skill_names(turn.get("modified_skills")))
+    return names
 
 
 def _llm_request_timeout_seconds() -> float:
@@ -177,6 +222,167 @@ def _normalize_tool_name(raw_name: str, args_raw: str) -> str:
         if isinstance(args_obj.get("sessionId"), str) and args_obj.get("sessionId"):
             return "process"
     return "unknown_tool"
+
+
+def _normalize_tool_call_name(raw_name: str) -> str:
+    """Strip transport-specific prefixes from a tool name."""
+    name = str(raw_name or "").strip()
+    if name.startswith("functions."):
+        return name.split(".", 1)[1]
+    return name
+
+
+def _deduplicate_paths(paths: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for path in paths:
+        clean = str(path or "").strip()
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        out.append(clean)
+    return out
+
+
+def _extract_skill_paths_from_patch(raw_text: str) -> list[str]:
+    return _deduplicate_paths([
+        match.group(1).strip()
+        for match in _PATCH_PATH_RE.finditer(str(raw_text or ""))
+        if match.group(1).strip().endswith("SKILL.md")
+    ])
+
+
+def _extract_skill_paths_from_shell(command: str) -> list[str]:
+    return _deduplicate_paths([
+        match.group(1).strip()
+        for match in _SHELL_SKILL_PATH_RE.finditer(str(command or ""))
+        if match.group(1).strip().endswith("SKILL.md")
+    ])
+
+
+def _extract_skill_paths_from_args_dict(args: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+    for key in (
+        "path",
+        "file",
+        "file_path",
+        "target",
+        "destination",
+        "dest",
+        "to",
+        "source",
+        "src",
+        "old_path",
+        "new_path",
+    ):
+        value = args.get(key)
+        if isinstance(value, str) and value.strip().endswith("SKILL.md"):
+            paths.append(value.strip())
+
+    raw_paths = args.get("paths")
+    if isinstance(raw_paths, list):
+        for item in raw_paths:
+            if isinstance(item, str) and item.strip().endswith("SKILL.md"):
+                paths.append(item.strip())
+    return _deduplicate_paths(paths)
+
+
+def _extract_skill_paths_from_tool_call(tool_call: dict) -> tuple[str, list[str]]:
+    func = tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
+    tool_name = _normalize_tool_call_name(func.get("name") or "")
+    args_raw = func.get("arguments", "{}")
+    if not isinstance(args_raw, str):
+        try:
+            args_raw = json.dumps(args_raw, ensure_ascii=False)
+        except Exception:
+            args_raw = "{}"
+
+    paths: list[str] = []
+    args_obj: Any = None
+    try:
+        args_obj = json.loads(args_raw)
+    except Exception:
+        args_obj = None
+
+    if isinstance(args_obj, dict):
+        paths.extend(_extract_skill_paths_from_args_dict(args_obj))
+        if tool_name.lower() in _SHELL_TOOL_NAMES:
+            command = str(args_obj.get("command") or args_obj.get("cmd") or "")
+            paths.extend(_extract_skill_paths_from_shell(command))
+
+    if tool_name.lower() in {"apply_patch", "patch"}:
+        paths.extend(_extract_skill_paths_from_patch(args_raw))
+    elif tool_name.lower() in _SHELL_TOOL_NAMES:
+        paths.extend(_extract_skill_paths_from_shell(args_raw))
+
+    return tool_name, _deduplicate_paths(paths)
+
+
+def _extract_hermes_skill_name_from_tool_call(tool_call: dict) -> tuple[str, str]:
+    """Extract Hermes-native skill names from skill_view / skill_manage calls."""
+    func = tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
+    tool_name = _normalize_tool_call_name(func.get("name") or "")
+    args_raw = func.get("arguments", "{}")
+    if not isinstance(args_raw, str):
+        try:
+            args_raw = json.dumps(args_raw, ensure_ascii=False)
+        except Exception:
+            args_raw = "{}"
+
+    try:
+        args_obj = json.loads(args_raw)
+    except Exception:
+        args_obj = {}
+
+    if not isinstance(args_obj, dict):
+        return tool_name, ""
+
+    for key in ("skill_name", "name", "skill"):
+        value = args_obj.get(key)
+        if isinstance(value, str) and value.strip():
+            return tool_name, value.strip()
+    return tool_name, ""
+
+
+def _resolve_skill_reference(
+    path: str,
+    skill_path_map: dict[str, dict[str, str]],
+) -> dict[str, str]:
+    expanded = os.path.expanduser(str(path or "").strip())
+    real_path = os.path.realpath(expanded) if expanded else ""
+    skill_info = (
+        skill_path_map.get(real_path)
+        or skill_path_map.get(expanded)
+        or skill_path_map.get(str(path or "").strip())
+    )
+    if skill_info:
+        return {
+            "skill_id": str(skill_info.get("skill_id", "") or ""),
+            "skill_name": str(skill_info.get("skill_name", "") or ""),
+            "path": str(path or "").strip(),
+        }
+    return {
+        "skill_id": "",
+        "skill_name": os.path.basename(os.path.dirname(expanded or str(path or "").strip())),
+        "path": str(path or "").strip(),
+    }
+
+
+def _resolve_skill_reference_by_name(
+    skill_name: str,
+    skill_path_map: dict[str, dict[str, str]],
+) -> dict[str, str]:
+    clean_name = str(skill_name or "").strip()
+    if not clean_name:
+        return {"skill_id": "", "skill_name": "", "path": ""}
+    for path, skill_info in skill_path_map.items():
+        if str(skill_info.get("skill_name", "") or "").strip() == clean_name:
+            return {
+                "skill_id": str(skill_info.get("skill_id", "") or ""),
+                "skill_name": clean_name,
+                "path": str(path or ""),
+            }
+    return {"skill_id": "", "skill_name": clean_name, "path": ""}
 
 def _extract_tool_calls_from_text(text: str) -> tuple[str, list[dict]]:
     """
@@ -589,7 +795,7 @@ def _build_tool_summaries(tool_calls: list[dict]) -> list[dict]:
     summaries: list[dict] = []
     for tc in tool_calls:
         func = tc.get("function", {})
-        name = str(func.get("name", "unknown"))
+        name = _normalize_tool_call_name(func.get("name", "unknown"))
         args_raw = func.get("arguments", "{}")
         if not isinstance(args_raw, str):
             try:
@@ -600,6 +806,7 @@ def _build_tool_summaries(tool_calls: list[dict]) -> list[dict]:
             args = json.loads(args_raw)
         except Exception:
             args = {}
+        _, skill_paths = _extract_skill_paths_from_tool_call(tc)
 
         summary: dict[str, Any] = {
             "tool_name": name,
@@ -608,7 +815,7 @@ def _build_tool_summaries(tool_calls: list[dict]) -> list[dict]:
             "has_error": False,
         }
 
-        if name.lower() in ("shell", "exec", "bash", "terminal"):
+        if name.lower() in _SHELL_TOOL_NAMES:
             cmd = str(args.get("command") or args.get("cmd") or "")
             if cmd:
                 summary["command"] = cmd[:_TOOL_ARGS_MAX_CHARS]
@@ -616,6 +823,8 @@ def _build_tool_summaries(tool_calls: list[dict]) -> list[dict]:
         path = str(args.get("path") or args.get("file") or args.get("file_path") or "")
         if path:
             summary["path"] = path
+        elif skill_paths:
+            summary["path"] = skill_paths[0]
 
         summaries.append(summary)
     return summaries
@@ -633,32 +842,64 @@ def _extract_read_skills_from_tool_calls(
     read_skills: list[dict] = []
     seen_ids: set[str] = set()
     for tc in tool_calls:
-        func = tc.get("function", {})
-        name = (func.get("name") or "").strip()
-        if name.lower() not in ("read", "file_read", "read_file", "readfile"):
+        tool_name, skill_paths = _extract_skill_paths_from_tool_call(tc)
+        normalized = tool_name.lower()
+        if normalized in _HERMES_SKILL_READ_TOOL_NAMES:
+            _, skill_name = _extract_hermes_skill_name_from_tool_call(tc)
+            skill_ref = _resolve_skill_reference_by_name(skill_name, skill_path_map)
+            dedupe_key = skill_ref.get("skill_id") or skill_ref.get("skill_name")
+            if dedupe_key and dedupe_key not in seen_ids:
+                read_skills.append(skill_ref)
+                seen_ids.add(dedupe_key)
             continue
-        try:
-            args = json.loads(func.get("arguments", "{}"))
-        except Exception:
+        if normalized not in _READ_TOOL_NAMES:
             continue
-        path = str(args.get("path") or args.get("file") or "")
-        if not path.endswith("SKILL.md"):
-            continue
-
-        real_path = os.path.realpath(path) if path else ""
-        skill_info = skill_path_map.get(real_path) or skill_path_map.get(path)
-
-        if skill_info:
-            sid = skill_info["skill_id"]
-            if sid not in seen_ids:
-                read_skills.append(dict(skill_info))
-                seen_ids.add(sid)
-        elif path not in seen_ids:
-            dir_name = os.path.basename(os.path.dirname(path))
-            read_skills.append({"skill_id": "", "skill_name": dir_name})
-            seen_ids.add(path)
+        for path in skill_paths:
+            skill_ref = _resolve_skill_reference(path, skill_path_map)
+            dedupe_key = skill_ref.get("skill_id") or skill_ref.get("path") or skill_ref.get("skill_name")
+            if not dedupe_key or dedupe_key in seen_ids:
+                continue
+            read_skills.append(skill_ref)
+            seen_ids.add(dedupe_key)
 
     return read_skills
+
+
+def _extract_modified_skills_from_tool_calls(
+    tool_calls: list[dict],
+    skill_path_map: dict[str, dict[str, str]],
+) -> list[dict]:
+    """Identify SKILL.md files the model attempted to write or update."""
+    modified_skills: list[dict] = []
+    seen_ids: set[str] = set()
+    for tc in tool_calls:
+        tool_name, skill_paths = _extract_skill_paths_from_tool_call(tc)
+        normalized = tool_name.lower()
+        if normalized in _READ_TOOL_NAMES:
+            continue
+        if normalized in _HERMES_SKILL_WRITE_TOOL_NAMES:
+            _, skill_name = _extract_hermes_skill_name_from_tool_call(tc)
+            skill_ref = _resolve_skill_reference_by_name(skill_name, skill_path_map)
+            dedupe_key = skill_ref.get("skill_id") or skill_ref.get("skill_name")
+            if dedupe_key and dedupe_key not in seen_ids:
+                modified_skills.append({**skill_ref, "action": normalized})
+                seen_ids.add(dedupe_key)
+            continue
+        if normalized not in _SKILL_WRITE_TOOL_NAMES and normalized not in _SHELL_TOOL_NAMES:
+            continue
+        for path in skill_paths:
+            skill_ref = _resolve_skill_reference(path, skill_path_map)
+            dedupe_key = skill_ref.get("skill_id") or skill_ref.get("path") or skill_ref.get("skill_name")
+            if not dedupe_key or dedupe_key in seen_ids:
+                continue
+            modified_skills.append(
+                {
+                    **skill_ref,
+                    "action": "shell" if normalized in _SHELL_TOOL_NAMES else normalized,
+                }
+            )
+            seen_ids.add(dedupe_key)
+    return modified_skills
 
 
 def _merge_tool_error_info(
@@ -1724,10 +1965,11 @@ class SkillClawAPIServer:
             if self.skill_manager:
                 self.skill_manager._save_stats()
             turns = self._session_turns.pop(session_id, [])
+            modified_skill_names = _extract_modified_skill_names(turns)
             if turns and self.config.sharing_enabled:
                 self._safe_create_task(self._upload_session_data(session_id, turns))
             if self.config.sharing_enabled:
-                self._safe_create_task(self._pull_skills_from_cloud())
+                self._safe_create_task(self._pull_skills_from_cloud(skip_names=modified_skill_names))
             self._session_last_active.pop(session_id, None)
             for key, meta in list(self._tui_session_meta.items()):
                 if isinstance(meta, dict) and meta.get("session_id") == session_id:
@@ -2089,12 +2331,21 @@ class SkillClawAPIServer:
             read_skills = _extract_read_skills_from_tool_calls(
                 tool_calls, skill_path_map,
             )
+            modified_skills = _extract_modified_skills_from_tool_calls(
+                tool_calls, skill_path_map,
+            )
             tool_summaries = _build_tool_summaries(tool_calls)
             if read_skills:
                 logger.info(
                     "[SkillManager] model read %d skill(s): %s",
                     len(read_skills),
                     ", ".join(r.get("skill_name", "?") for r in read_skills),
+                )
+            if modified_skills:
+                logger.info(
+                    "[SkillManager] model modified %d skill(s): %s",
+                    len(modified_skills),
+                    ", ".join(r.get("skill_name", "?") for r in modified_skills),
                 )
 
             user_instruction = _extract_last_user_instruction(messages)
@@ -2120,6 +2371,7 @@ class SkillClawAPIServer:
                     "reasoning_content": reasoning or None,
                     "tool_calls": tool_calls,
                     "read_skills": read_skills,
+                    "modified_skills": modified_skills,
                     "tool_results": tool_summaries,
                     "tool_results_raw": [],
                     "tool_observations": [],
@@ -2189,6 +2441,7 @@ class SkillClawAPIServer:
                 "reasoning_content": reasoning or None,
                 "tool_calls": tool_calls,
                 "read_skills": read_skills,
+                "modified_skills": modified_skills,
                 "tool_results": tool_summaries,
                 "tool_results_raw": [],
                 "tool_observations": [],
@@ -2441,7 +2694,7 @@ class SkillClawAPIServer:
     # Skill pull (cloud -> local)                                          #
     # ------------------------------------------------------------------ #
 
-    async def _pull_skills_from_cloud(self) -> None:
+    async def _pull_skills_from_cloud(self, skip_names: Optional[set[str]] = None) -> None:
         """Pull latest skills from cloud storage and reload the skill manager.
 
         This is a *read-only* operation — local skills are never pushed
@@ -2450,7 +2703,7 @@ class SkillClawAPIServer:
         try:
             from .skill_hub import SkillHub
             hub = SkillHub.from_config(self.config)
-            pull_result = hub.pull_skills(self.config.skills_dir)
+            pull_result = hub.pull_skills(self.config.skills_dir, skip_names=skip_names)
             logger.info(
                 "[SkillHub] skill pull: %d downloaded, %d unchanged, %d deleted",
                 pull_result["downloaded"], pull_result["skipped"], pull_result.get("deleted", 0),
@@ -2536,6 +2789,11 @@ class SkillClawAPIServer:
         """
         if not self.skill_manager:
             return messages, []
+
+        try:
+            self.skill_manager.refresh_if_changed()
+        except Exception as e:
+            logger.warning("[SkillManager] failed to refresh local skills: %s", e)
 
         skill_text = self.skill_manager.build_injection_prompt(
             max_chars=getattr(self.config, "max_skills_prompt_chars", 30_000),

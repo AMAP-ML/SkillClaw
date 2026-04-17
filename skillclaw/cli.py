@@ -54,6 +54,52 @@ def _clear_pid_if_matches(pid: int):
     runtime_state.clear_pid_if_matches(pid)
 
 
+def _echo_report(report: dict[str, object]) -> None:
+    ordered_keys = [
+        "status",
+        "integration_scope",
+        "config_path",
+        "config_exists",
+        "expected_model",
+        "configured_model",
+        "expected_base_url",
+        "configured_base_url",
+        "configured_provider",
+        "proxy_match",
+        "expected_skills_dir",
+        "skills_dir_exists",
+        "skills_dir_mode",
+        "legacy_skillclaw_skills_dir",
+        "legacy_skillclaw_skills_present",
+        "latest_backup",
+        "session_boundary_mode",
+    ]
+    list_keys = {"issues", "notes", "next_steps"}
+    emitted: set[str] = set()
+
+    for key in ordered_keys:
+        if key not in report:
+            continue
+        click.echo(f"{key}: {report[key]}")
+        emitted.add(key)
+
+    for key, value in report.items():
+        if key in emitted or key in list_keys:
+            continue
+        click.echo(f"{key}: {value}")
+
+    for key in ("issues", "notes", "next_steps"):
+        value = report.get(key)
+        if not isinstance(value, list):
+            continue
+        click.echo(f"{key}:")
+        if not value:
+            click.echo("  (none)")
+            continue
+        for item in value:
+            click.echo(f"  - {item}")
+
+
 def _healthz_ready(port: int, timeout: float = 0.5) -> bool:
     import urllib.request
 
@@ -357,6 +403,53 @@ def config_cmd(key_or_action: str, value: str | None):
 
     cs.set(key_or_action, value)
     click.echo(f"Set {key_or_action} = {cs.get(key_or_action)}")
+
+
+@skillclaw.group()
+def doctor():
+    """Integration diagnostics."""
+
+
+@doctor.command(name="hermes")
+def doctor_hermes():
+    """Inspect the local Hermes integration state."""
+    from .claw_adapter import inspect_hermes_config
+
+    cs = ConfigStore()
+    if not cs.exists():
+        raise click.ClickException("No config file found. Run 'skillclaw setup' first.")
+
+    report = inspect_hermes_config(cs.to_skillclaw_config())
+    _echo_report(report)
+
+
+@skillclaw.group()
+def restore():
+    """Restore agent integration state from backups."""
+
+
+@restore.command(name="hermes")
+@click.option(
+    "--backup",
+    "backup_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=str),
+    default=None,
+    help="Restore from a specific backup file instead of the latest Hermes backup.",
+)
+def restore_hermes(backup_path: str | None):
+    """Restore ~/.hermes/config.yaml from a saved backup."""
+    from .claw_adapter import restore_hermes_config
+
+    try:
+        result = restore_hermes_config(
+            Path(backup_path).expanduser() if backup_path else None
+        )
+    except FileNotFoundError as exc:
+        raise click.ClickException(str(exc)) from None
+
+    click.echo(
+        f"Restored Hermes config: {result['target']} <- {result['source']}"
+    )
 
 
 @skillclaw.group()

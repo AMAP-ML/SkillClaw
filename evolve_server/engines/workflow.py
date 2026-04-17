@@ -147,6 +147,26 @@ class EvolveServer:
     def _load_remote_skills(self) -> dict[str, dict[str, Any]]:
         return load_manifest(self._bucket, self._prefix)
 
+    def _load_remote_skill_record(self, name: str) -> Optional[dict[str, Any]]:
+        rec = self._load_remote_skills().get(name)
+        return rec if isinstance(rec, dict) else None
+
+    @staticmethod
+    def _overlay_manifest_metadata(
+        skill: Optional[dict[str, Any]],
+        manifest_record: Optional[dict[str, Any]],
+    ) -> Optional[dict[str, Any]]:
+        if not skill or not manifest_record:
+            return skill
+        category = str(manifest_record.get("category", "") or "").strip()
+        if category and str(skill.get("category", "general") or "general").strip() == "general":
+            skill["category"] = category
+        if not str(skill.get("description", "") or "").strip():
+            description = str(manifest_record.get("description", "") or "").strip()
+            if description:
+                skill["description"] = description
+        return skill
+
     def _fetch_skill(self, name: str) -> Optional[str]:
         return fetch_skill_content(self._bucket, self._prefix, name)
 
@@ -205,6 +225,10 @@ class EvolveServer:
             return action_type
 
         existing_skill = parse_skill_content(name, existing_md)
+        existing_skill = self._overlay_manifest_metadata(
+            existing_skill,
+            self._load_remote_skill_record(name),
+        )
         existing_skill["_version"] = self._id_registry.get_version(name)
         merged = await execute_merge(self._llm, existing_skill, skill)
         if merged and merged.get("name"):
@@ -653,6 +677,10 @@ class EvolveServer:
     ) -> Optional[dict]:
         current_md = await self._call_storage(self._fetch_skill, skill_name)
         current_skill = parse_skill_content(skill_name, current_md) if current_md else None
+        current_skill = self._overlay_manifest_metadata(
+            current_skill,
+            await self._call_storage(self._load_remote_skill_record, skill_name),
+        )
 
         result = await evolve_skill_from_sessions(
             self._llm,
@@ -716,6 +744,7 @@ class EvolveServer:
         skill_group_count = 0
         no_skill_sessions: list[dict] = []
         evolution_records: list[dict] = []
+        had_processing_error = False
 
         if sessions:
             logger.info("[EvolveServer] summarizing %d sessions", len(sessions))
@@ -736,15 +765,20 @@ class EvolveServer:
                     record = await self._evolve_skill_group(skill_name, skill_sessions, existing_skill_names)
                 except Exception as exc:
                     logger.error("[EvolveServer] skill '%s' evolve failed: %s", skill_name, exc)
+                    had_processing_error = True
                     continue
                 if record:
                     evolution_records.append(record)
 
             if no_skill_sessions:
                 logger.info("[EvolveServer] processing %d no-skill sessions", len(no_skill_sessions))
-                evolution_records.extend(
-                    await self._handle_no_skill_sessions(no_skill_sessions, existing_skill_names)
-                )
+                try:
+                    evolution_records.extend(
+                        await self._handle_no_skill_sessions(no_skill_sessions, existing_skill_names)
+                    )
+                except Exception as exc:
+                    logger.error("[EvolveServer] no-skill evolve failed: %s", exc)
+                    had_processing_error = True
         else:
             logger.info("[EvolveServer] queue empty - checking pending validation publish jobs")
 
@@ -752,8 +786,13 @@ class EvolveServer:
         all_records = evolution_records + published_records
 
         await self._call_storage(self._id_registry.save_to_oss, self._bucket, self._prefix)
-        if session_keys:
+        if session_keys and not had_processing_error:
             await self._call_storage(delete_session_keys, self._bucket, session_keys)
+        elif session_keys and had_processing_error:
+            logger.warning(
+                "[EvolveServer] retaining %d session(s) in queue because this cycle had processing errors",
+                len(session_keys),
+            )
 
         elapsed = round(time.monotonic() - started_at, 1)
         uploaded_skills = sum(1 for record in all_records if record.get("uploaded"))
@@ -779,6 +818,7 @@ class EvolveServer:
             "session_judge": judge_summary,
             "skill_verifier": skill_verifier_summary,
             "validation_publish": validation_publish_summary,
+            "had_processing_error": had_processing_error,
         }
         self._append_history(summary)
         logger.info(

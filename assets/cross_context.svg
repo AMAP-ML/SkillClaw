@@ -1,0 +1,178 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 790" width="960" height="790">
+  <defs>
+    <linearGradient id="titleGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#D44040"/>
+      <stop offset="100%" stop-color="#4A90D4"/>
+    </linearGradient>
+    <linearGradient id="hubGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#EBF4FF"/>
+      <stop offset="100%" stop-color="#D4E8FA"/>
+    </linearGradient>
+    <linearGradient id="dividerGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="20%" stop-color="#F0CDCB"/>
+      <stop offset="50%" stop-color="#E2E8F0"/>
+      <stop offset="80%" stop-color="#B8D4F0"/>
+      <stop offset="100%" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <filter id="hubGlow">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <style>
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
+    @keyframes corePulse{0%,100%{opacity:.85}50%{opacity:1}}
+    @keyframes flowIn{0%{stroke-dashoffset:20}100%{stroke-dashoffset:0}}
+    @keyframes flowOut{0%{stroke-dashoffset:-20}100%{stroke-dashoffset:0}}
+    @keyframes flowRight{0%{stroke-dashoffset:16}100%{stroke-dashoffset:0}}
+    @keyframes ringRotate{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+    .pulse{animation:pulse 2.5s ease-in-out infinite}
+    .core-pulse{animation:corePulse 3s ease-in-out infinite}
+    .flow-in{stroke-dasharray:6 4;animation:flowIn .8s linear infinite}
+    .flow-out{stroke-dasharray:6 4;animation:flowOut .8s linear infinite}
+    .flow-right{stroke-dasharray:5 3;animation:flowRight .6s linear infinite}
+    .ring-spin{transform-origin:480px 400px;animation:ringRotate 20s linear infinite}
+  </style>
+
+  <rect width="960" height="790" rx="18" fill="#FFFFFF"/>
+  <rect width="960" height="790" rx="18" fill="none" stroke="#E2E8F0" stroke-width="1"/>
+
+  <!-- TITLE -->
+  <text x="480" y="32" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="14" font-weight="800" letter-spacing="5" fill="url(#titleGrad)">SEAMLESS CONTEXT</text>
+  <text x="480" y="58" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="22" font-weight="900" fill="#0F172A">One User, Multiple Hermes, Unified Skills</text>
+  <!-- user avatar -->
+  <circle cx="350" cy="80" r="10" fill="#EDE9FE" stroke="#8B5CF6" stroke-width="1.2"/>
+  <circle cx="350" cy="77" r="3.5" fill="#7C3AED"/>
+  <path d="M343,86 Q350,91 357,86" fill="none" stroke="#7C3AED" stroke-width="1.5" stroke-linecap="round"/>
+  <text x="366" y="85" font-family="Inter,-apple-system,sans-serif" font-size="13" font-weight="600" fill="#6D28D9">You &#x2014; same person, different places</text>
+  <rect x="80" y="96" width="800" height="1.5" rx="1" fill="url(#dividerGrad)"/>
+
+  <!-- Legend (top-right corner, out of the way) -->
+  <g transform="translate(710,76)">
+    <line x1="0" y1="0" x2="20" y2="0" stroke="#D44040" stroke-width="2.5" class="flow-in"/>
+    <polygon points="24,-3 24,3 28,0" fill="#D44040"/>
+    <text x="34" y="4" font-family="Inter,-apple-system,sans-serif" font-size="11" font-weight="600" fill="#B5302A">In</text>
+    <line x1="60" y1="0" x2="80" y2="0" stroke="#4A90D4" stroke-width="2.5" class="flow-out"/>
+    <polygon points="84,-3 84,3 88,0" fill="#4A90D4"/>
+    <text x="94" y="4" font-family="Inter,-apple-system,sans-serif" font-size="11" font-weight="600" fill="#2B6FAC">Back</text>
+  </g>
+
+  <!-- ===== ARROWS (behind everything) ===== -->
+  <line x1="472" y1="238" x2="472" y2="288" stroke="#D44040" stroke-width="2" class="flow-in"/>
+  <polygon points="467.8,288.0 476.2,288.0 472.0,294.0" fill="#D44040"/>
+  <line x1="488" y1="288" x2="488" y2="238" stroke="#4A90D4" stroke-width="2" class="flow-out" style="animation-delay:.2s"/>
+  <polygon points="492.2,238.0 483.8,238.0 488.0,232.0" fill="#4A90D4"/>
+
+  <line x1="206" y1="598" x2="392" y2="470" stroke="#D44040" stroke-width="2" class="flow-in"/>
+  <polygon points="394.6,473.5 389.8,466.5 397.1,466.6" fill="#D44040"/>
+  <line x1="383" y1="457" x2="197" y2="585" stroke="#4A90D4" stroke-width="2" class="flow-out" style="animation-delay:.2s"/>
+  <polygon points="194.2,581.5 198.9,588.4 191.6,588.3" fill="#4A90D4"/>
+
+  <line x1="763" y1="585" x2="577" y2="457" stroke="#D44040" stroke-width="2" class="flow-in"/>
+  <polygon points="579.2,453.3 574.5,460.3 571.9,453.4" fill="#D44040"/>
+  <line x1="568" y1="470" x2="754" y2="598" stroke="#4A90D4" stroke-width="2" class="flow-out" style="animation-delay:.2s"/>
+  <polygon points="752.0,601.6 756.8,594.6 759.4,601.5" fill="#4A90D4"/>
+
+  <!-- ===== 3 SCENE CARDS ===== -->
+  <rect x="370" y="110" width="220" height="120" rx="12" fill="#FEF7F7" stroke="#F0CDCB" stroke-width="1.2"/>
+  <g transform="translate(382,118) scale(0.85)">
+    <path d="M16,2 L2,14 L6,14 L6,26 L26,26 L26,14 L30,14 Z" fill="#FCEAEA" stroke="#D44040" stroke-width="1.5" stroke-linejoin="round"/>
+    <rect x="12" y="16" width="8" height="10" rx="1" fill="#F0CDCB" stroke="#D44040" stroke-width="1"/>
+  </g>
+  <text x="412" y="134" font-family="Inter,-apple-system,sans-serif" font-size="16" font-weight="800" fill="#B5302A">Home</text>
+  <text x="412" y="150" font-family="Inter,-apple-system,sans-serif" font-size="11" fill="#C0392B">Personal projects</text>
+  <g transform="translate(382,158)"><circle cx="8" cy="8" r="8" fill="#FCEAEA" stroke="#E8A0A0" stroke-width="1"/><path d="M9,2 L7,8 L8,8 L7,14 L11,6 L9,6 Z" fill="#D44040"/></g>
+  <text x="404" y="170" font-family="Inter,-apple-system,sans-serif" font-size="11" font-weight="700" fill="#B5302A">Hermes</text>
+  <rect x="382" y="180" width="48" height="18" rx="4" fill="#FFF" stroke="#E8A0A0" stroke-width="1" class="pulse" style="animation-delay:0.0s"/>
+  <text x="406" y="193" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="10" font-weight="700" fill="#D44040">React</text>
+  <rect x="434" y="180" width="48" height="18" rx="4" fill="#FFF" stroke="#E8A0A0" stroke-width="1" class="pulse" style="animation-delay:0.2s"/>
+  <text x="458" y="193" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="10" font-weight="700" fill="#D44040">CSS</text>
+  <rect x="486" y="180" width="48" height="18" rx="4" fill="#FFF" stroke="#E8A0A0" stroke-width="1" class="pulse" style="animation-delay:0.4s"/>
+  <text x="510" y="193" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="10" font-weight="700" fill="#D44040">Node.js</text>
+  <rect x="538" y="180" width="30" height="18" rx="4" fill="#D4E8FA" stroke="#C2D9F0" stroke-width="1"/>
+  <text x="553" y="193" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="10" font-weight="800" fill="#4A90D4">+6</text>
+  <text x="382" y="216" font-family="Inter,-apple-system,sans-serif" font-size="10" fill="#3A7CBD">+ Python, LaTeX, ML, Docker, K8s, SQL</text>
+
+  <rect x="35" y="570" width="220" height="120" rx="12" fill="#FEF7F7" stroke="#F0CDCB" stroke-width="1.2"/>
+  <g transform="translate(47,578) scale(0.85)">
+    <path d="M16,6 L0,14 L16,22 L32,14 Z" fill="#FCEAEA" stroke="#D44040" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M8,16 L8,24 Q16,30 24,24 L24,16" fill="none" stroke="#D44040" stroke-width="1.5"/>
+    <line x1="30" y1="14" x2="30" y2="26" stroke="#D44040" stroke-width="1.5" stroke-linecap="round"/>
+    <circle cx="30" cy="27" r="1.5" fill="#D44040"/>
+  </g>
+  <text x="77" y="594" font-family="Inter,-apple-system,sans-serif" font-size="16" font-weight="800" fill="#B5302A">School</text>
+  <text x="77" y="610" font-family="Inter,-apple-system,sans-serif" font-size="11" fill="#C0392B">Academic &amp; research</text>
+  <g transform="translate(47,618)"><circle cx="8" cy="8" r="8" fill="#FCEAEA" stroke="#E8A0A0" stroke-width="1"/><path d="M9,2 L7,8 L8,8 L7,14 L11,6 L9,6 Z" fill="#D44040"/></g>
+  <text x="69" y="630" font-family="Inter,-apple-system,sans-serif" font-size="11" font-weight="700" fill="#B5302A">Hermes</text>
+  <rect x="47" y="640" width="48" height="18" rx="4" fill="#FFF" stroke="#E8A0A0" stroke-width="1" class="pulse" style="animation-delay:0.0s"/>
+  <text x="71" y="653" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="10" font-weight="700" fill="#D44040">Python</text>
+  <rect x="99" y="640" width="48" height="18" rx="4" fill="#FFF" stroke="#E8A0A0" stroke-width="1" class="pulse" style="animation-delay:0.2s"/>
+  <text x="123" y="653" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="10" font-weight="700" fill="#D44040">LaTeX</text>
+  <rect x="151" y="640" width="48" height="18" rx="4" fill="#FFF" stroke="#E8A0A0" stroke-width="1" class="pulse" style="animation-delay:0.4s"/>
+  <text x="175" y="653" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="10" font-weight="700" fill="#D44040">ML/AI</text>
+  <rect x="203" y="640" width="30" height="18" rx="4" fill="#D4E8FA" stroke="#C2D9F0" stroke-width="1"/>
+  <text x="218" y="653" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="10" font-weight="800" fill="#4A90D4">+6</text>
+  <text x="47" y="676" font-family="Inter,-apple-system,sans-serif" font-size="10" fill="#3A7CBD">+ React, CSS, Node, Docker, K8s, SQL</text>
+
+  <rect x="705" y="570" width="220" height="120" rx="12" fill="#FEF7F7" stroke="#F0CDCB" stroke-width="1.2"/>
+  <g transform="translate(717,578) scale(0.85)">
+    <rect x="2" y="8" width="28" height="20" rx="3" fill="#FCEAEA" stroke="#D44040" stroke-width="1.5"/>
+    <path d="M10,8 L10,4 Q10,2 12,2 L20,2 Q22,2 22,4 L22,8" fill="none" stroke="#D44040" stroke-width="1.5"/>
+    <line x1="2" y1="18" x2="30" y2="18" stroke="#D44040" stroke-width="1"/>
+  </g>
+  <text x="747" y="594" font-family="Inter,-apple-system,sans-serif" font-size="16" font-weight="800" fill="#B5302A">Company</text>
+  <text x="747" y="610" font-family="Inter,-apple-system,sans-serif" font-size="11" fill="#C0392B">Work &amp; production</text>
+  <g transform="translate(717,618)"><circle cx="8" cy="8" r="8" fill="#FCEAEA" stroke="#E8A0A0" stroke-width="1"/><path d="M9,2 L7,8 L8,8 L7,14 L11,6 L9,6 Z" fill="#D44040"/></g>
+  <text x="739" y="630" font-family="Inter,-apple-system,sans-serif" font-size="11" font-weight="700" fill="#B5302A">Hermes</text>
+  <rect x="717" y="640" width="48" height="18" rx="4" fill="#FFF" stroke="#E8A0A0" stroke-width="1" class="pulse" style="animation-delay:0.0s"/>
+  <text x="741" y="653" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="10" font-weight="700" fill="#D44040">Docker</text>
+  <rect x="769" y="640" width="48" height="18" rx="4" fill="#FFF" stroke="#E8A0A0" stroke-width="1" class="pulse" style="animation-delay:0.2s"/>
+  <text x="793" y="653" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="10" font-weight="700" fill="#D44040">K8s</text>
+  <rect x="821" y="640" width="48" height="18" rx="4" fill="#FFF" stroke="#E8A0A0" stroke-width="1" class="pulse" style="animation-delay:0.4s"/>
+  <text x="845" y="653" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="10" font-weight="700" fill="#D44040">SQL</text>
+  <rect x="873" y="640" width="30" height="18" rx="4" fill="#D4E8FA" stroke="#C2D9F0" stroke-width="1"/>
+  <text x="888" y="653" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="10" font-weight="800" fill="#4A90D4">+6</text>
+  <text x="717" y="676" font-family="Inter,-apple-system,sans-serif" font-size="10" fill="#3A7CBD">+ React, CSS, Node, Python, LaTeX, ML</text>
+
+  <!-- ===== CENTRAL HUB ===== -->
+  <circle cx="480" cy="400" r="118" fill="none" stroke="#B8D4F0" stroke-width="1" opacity=".25" class="core-pulse"/>
+  <circle cx="480" cy="400" r="109" fill="none" stroke="#C2D9F0" stroke-width="1" stroke-dasharray="6 10" class="ring-spin"/>
+  <circle cx="480" cy="400" r="100" fill="url(#hubGrad)" stroke="#B8D4F0" stroke-width="2" filter="url(#hubGlow)"/>
+
+  <!-- Shield icon -->
+  <g transform="translate(464,325)">
+    <path d="M16,0 L4,6 L4,16 C4,26 10,32 16,36 C22,32 28,26 28,16 L28,6 Z" fill="none" stroke="#4A90D4" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M11,17 L14,21 L22,11" fill="none" stroke="#4A90D4" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="480" y="372" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="22" font-weight="800" fill="#1D4E7E">SKILLCLAW</text>
+
+  <!-- 4-step flow: horizontal row -->
+  <rect x="390" y="388" width="54" height="24" rx="6" fill="#D4E8FA" stroke="#B8D4F0" stroke-width="1"/>
+  <text x="417" y="406" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="12" font-weight="800" fill="#2B6FAC">Filter</text>
+
+  <line x1="444" y1="400" x2="454" y2="400" stroke="#6AAAD8" stroke-width="2" class="flow-right"/>
+  <polygon points="454,396 462,400 454,404" fill="#6AAAD8"/>
+
+  <rect x="462" y="388" width="66" height="24" rx="6" fill="#D4E8FA" stroke="#B8D4F0" stroke-width="1"/>
+  <text x="495" y="406" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="12" font-weight="800" fill="#2B6FAC">Improve</text>
+
+  <!-- second row -->
+  <rect x="390" y="420" width="54" height="24" rx="6" fill="#D4E8FA" stroke="#B8D4F0" stroke-width="1"/>
+  <text x="417" y="438" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="12" font-weight="800" fill="#2B6FAC">Verify</text>
+
+  <line x1="444" y1="432" x2="454" y2="432" stroke="#6AAAD8" stroke-width="2" class="flow-right" style="animation-delay:.15s"/>
+  <polygon points="454,428 462,432 454,436" fill="#6AAAD8"/>
+
+  <rect x="462" y="420" width="66" height="24" rx="6" fill="#C2D9F0" stroke="#4A90D4" stroke-width="1.2"/>
+  <text x="495" y="438" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="12" font-weight="800" fill="#1D4E7E">Solidify</text>
+
+  <!-- Library label below hub -->
+  <text x="480" y="522" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="16" font-weight="700" fill="#1D4E7E">Unified Skill Library</text>
+  <text x="480" y="540" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="13" fill="#3A7CBD">Best of all contexts &#xB7; Evolved &#xB7; Verified</text>
+
+  <!-- KEY INSIGHT (bottom, no overlap) -->
+  <rect x="130" y="740" width="700" height="34" rx="10" fill="#F5F9FF" stroke="#C2D9F0" stroke-width="1.5"/>
+  <text x="480" y="762" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="14" font-weight="800" fill="#2B6FAC">Home skills make Work better &#xB7; Work skills make School faster &#xB7; All grow together</text>
+
+</svg>

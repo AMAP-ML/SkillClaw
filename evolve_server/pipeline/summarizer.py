@@ -191,6 +191,11 @@ def _format_step(
         name = s.get("skill_name", "").strip() if isinstance(s, dict) else str(s or "").strip()
         if name:
             skills.append(name)
+    modified = []
+    for s in turn.get("modified_skills") or []:
+        name = s.get("skill_name", "").strip() if isinstance(s, dict) else str(s or "").strip()
+        if name:
+            modified.append(name)
     injected = [str(s or "").strip() for s in (turn.get("injected_skills") or []) if str(s or "").strip()]
 
     prm = turn.get("prm_score")
@@ -201,6 +206,8 @@ def _format_step(
         header_parts.append(prm_str)
     if skills:
         header_parts.append(f"read_skills={skills}")
+    if modified:
+        header_parts.append(f"modified_skills={modified}")
     if injected:
         header_parts.append(f"injected={injected}")
     header = " | ".join(header_parts)
@@ -234,8 +241,9 @@ Given a complete agent session, produce a trajectory-aware analytical summary \
 2. **Key trajectory**: The step-by-step path the agent took — what it tried, \
 in what order, and why (e.g., "read skill X → attempted approach Y → hit \
 error Z → switched to W").
-3. **Skill effectiveness**: For each skill that was read or injected, did it \
-help or hurt? Was it relevant to the task? Was any guidance missing or wrong?
+3. **Skill effectiveness**: For each skill that was read, injected, or \
+modified, did it help or hurt? Was it relevant to the task? Was any guidance \
+missing or wrong?
 4. **Critical turning points**: Where things went right or wrong. What \
 caused failures? What enabled successes?
 5. **Tool usage patterns**: Which tools were used effectively, which caused \
@@ -292,6 +300,12 @@ def _build_session_payload(session: dict) -> dict[str, Any]:
                 s.get("skill_name", "") if isinstance(s, dict) else str(s or "")
                 for s in read_skills
             ]
+        modified_skills = t.get("modified_skills") or []
+        if modified_skills:
+            interaction["modified_skills"] = [
+                s.get("skill_name", "") if isinstance(s, dict) else str(s or "")
+                for s in modified_skills
+            ]
         injected = t.get("injected_skills") or []
         if injected:
             interaction["injected_skills"] = injected
@@ -335,7 +349,9 @@ def _extract_session_metadata(session: dict) -> None:
     """Extract skill references and compute aggregate metrics for a session.
 
     Attaches the following keys directly to the session dict:
-    - ``_skills_referenced``: set of skill names referenced by any interaction
+    - ``_skills_referenced``: set of skill names explicitly read or modified
+      by any interaction. Prompt-time injection alone is not treated as
+      evidence that the session actually used that skill.
     - ``_prm_scores``: list of all non-None PRM scores
     - ``_avg_prm``: mean PRM (or None if no scores)
     - ``_has_tool_errors``: True if any interaction had tool errors
@@ -353,8 +369,12 @@ def _extract_session_metadata(session: dict) -> None:
             )
             if name:
                 skills.add(name)
-        for item in turn.get("injected_skills") or []:
-            name = str(item or "").strip()
+        for item in turn.get("modified_skills") or []:
+            name = (
+                item.get("skill_name", "").strip()
+                if isinstance(item, dict)
+                else str(item or "").strip()
+            )
             if name:
                 skills.add(name)
         prm = turn.get("prm_score")

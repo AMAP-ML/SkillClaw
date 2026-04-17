@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import platform
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -35,6 +36,10 @@ if TYPE_CHECKING:
     from .config import SkillClawConfig
 
 logger = logging.getLogger(__name__)
+_LEGACY_SKILLCLAW_SKILLS_DIR = Path.home() / ".skillclaw" / "skills"
+_HERMES_HOME = Path.home() / ".hermes"
+_HERMES_SKILLS_DIR = _HERMES_HOME / "skills"
+_HERMES_BACKUP_DIR = Path.home() / ".skillclaw" / "backups" / "hermes"
 
 
 # ------------------------------------------------------------------ #
@@ -154,7 +159,7 @@ def _write_yaml_mapping_atomic(path: Path, data: dict, label: str) -> None:
             delete=False,
         ) as handle:
             tmp_path = Path(handle.name)
-            yaml.safe_dump(data, handle, sort_keys=False, allow_unicode=True)
+            handle.write(_yaml_mapping_to_text(data))
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp_path, path)
@@ -164,6 +169,73 @@ def _write_yaml_mapping_atomic(path: Path, data: dict, label: str) -> None:
     finally:
         if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
+
+
+def _yaml_mapping_to_text(data: dict) -> str:
+    return yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+
+
+def _write_text_atomic(path: Path, text: str, label: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            delete=False,
+        ) as handle:
+            tmp_path = Path(handle.name)
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+        logger.info("[ClawAdapter] %s updated: %s", label, path)
+    except Exception as e:
+        logger.error("[ClawAdapter] Failed to write %s %s: %s", label, path, e)
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+
+
+def _backup_hermes_config_if_changed(config_path: Path, new_text: str) -> Path | None:
+    """Save the current Hermes config before overwriting it, if it changed."""
+    if not config_path.exists():
+        return None
+
+    try:
+        current_text = config_path.read_text(encoding="utf-8")
+    except Exception as e:
+        logger.warning("[ClawAdapter] Failed to read Hermes config for backup: %s", e)
+        return None
+
+    if current_text == new_text:
+        return None
+
+    _HERMES_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    backup_path = _HERMES_BACKUP_DIR / f"config.{timestamp}.yaml"
+    latest_path = _HERMES_BACKUP_DIR / "config.latest.yaml"
+    try:
+        backup_path.write_text(current_text, encoding="utf-8")
+        latest_path.write_text(current_text, encoding="utf-8")
+        logger.info("[ClawAdapter] Hermes config backup saved: %s", backup_path)
+        return backup_path
+    except Exception as e:
+        logger.warning("[ClawAdapter] Failed to save Hermes config backup: %s", e)
+        return None
+
+
+def _latest_hermes_backup_path() -> Path | None:
+    latest_path = _HERMES_BACKUP_DIR / "config.latest.yaml"
+    if latest_path.exists():
+        return latest_path
+    if not _HERMES_BACKUP_DIR.is_dir():
+        return None
+    backups = sorted(_HERMES_BACKUP_DIR.glob("config.*.yaml"))
+    return backups[-1] if backups else None
 
 
 def _write_json_mapping_atomic(path: Path, data: dict, label: str) -> None:
@@ -195,10 +267,11 @@ def _write_json_mapping_atomic(path: Path, data: dict, label: str) -> None:
 
 def _configure_hermes(cfg: "SkillClawConfig") -> None:
     """Auto-configure Hermes to route model traffic through SkillClaw."""
-    config_path = Path.home() / ".hermes" / "config.yaml"
+    config_path = _HERMES_HOME / "config.yaml"
     model_id = cfg.served_model_name or cfg.llm_model_id or "skillclaw-model"
     api_key = cfg.proxy_api_key or "skillclaw"
     base_url = f"http://127.0.0.1:{cfg.proxy_port}/v1"
+    _prepare_hermes_skills_dir(cfg)
 
     data = _load_yaml_mapping(config_path, "Hermes")
     model = data.get("model")
@@ -213,7 +286,134 @@ def _configure_hermes(cfg: "SkillClawConfig") -> None:
     model["api_mode"] = ""
 
     data["model"] = model
+    _backup_hermes_config_if_changed(config_path, _yaml_mapping_to_text(data))
     _write_yaml_mapping_atomic(config_path, data, "Hermes")
+
+
+def inspect_hermes_config(cfg: "SkillClawConfig") -> dict[str, object]:
+    """Return a diagnostic snapshot of the local Hermes integration state."""
+    config_path = _HERMES_HOME / "config.yaml"
+    expected_model = cfg.served_model_name or cfg.llm_model_id or "skillclaw-model"
+    expected_base_url = f"http://127.0.0.1:{cfg.proxy_port}/v1"
+    expected_api_key = cfg.proxy_api_key or "skillclaw"
+    expected_skills_dir = Path(str(getattr(cfg, "skills_dir", "") or _HERMES_SKILLS_DIR)).expanduser()
+
+    data = _load_yaml_mapping(config_path, "Hermes")
+    model = data.get("model") if isinstance(data, dict) else {}
+    if not isinstance(model, dict):
+        model = {"default": model} if isinstance(model, str) and model else {}
+
+    configured_provider = str(model.get("provider", "") or "")
+    configured_base_url = str(model.get("base_url", "") or "")
+    configured_default = str(model.get("default", "") or "")
+    configured_api_key = str(model.get("api_key", "") or "")
+
+    backup_path = _latest_hermes_backup_path()
+    proxy_match = (
+        configured_provider == "custom"
+        and configured_base_url == expected_base_url
+        and configured_default == expected_model
+        and configured_api_key == expected_api_key
+    )
+    legacy_present = _LEGACY_SKILLCLAW_SKILLS_DIR.is_dir()
+    uses_default_skills_dir = expected_skills_dir == _HERMES_SKILLS_DIR
+    issues: list[str] = []
+    notes: list[str] = [
+        "This integration only rewrites Hermes-local config and does not touch other claw adapters.",
+        "Hermes session capture still relies on explicit session headers when available, with proxy-side heuristics as the fallback.",
+    ]
+    next_steps: list[str] = []
+
+    if not config_path.exists():
+        issues.append("Hermes config is missing: ~/.hermes/config.yaml")
+    if not proxy_match:
+        issues.append("Hermes model routing is not pointing at the local SkillClaw proxy.")
+        next_steps.append("Start SkillClaw once so it can rewrite ~/.hermes/config.yaml.")
+    if not expected_skills_dir.is_dir():
+        issues.append(f"Hermes skills directory is missing: {expected_skills_dir}")
+        next_steps.append(f"Create or prepare the Hermes skills directory: {expected_skills_dir}")
+    if legacy_present:
+        notes.append(
+            f"Legacy SkillClaw skills were found at {_LEGACY_SKILLCLAW_SKILLS_DIR}; missing skills are copied into the Hermes library on startup."
+        )
+    if not backup_path:
+        next_steps.append("Run SkillClaw once before relying on `skillclaw restore hermes`, so a backup can be created.")
+
+    return {
+        "status": "ok" if not issues else "warning",
+        "config_path": str(config_path),
+        "config_exists": config_path.exists(),
+        "integration_scope": "hermes-only",
+        "expected_model": expected_model,
+        "expected_base_url": expected_base_url,
+        "configured_provider": configured_provider or "(unset)",
+        "configured_base_url": configured_base_url or "(unset)",
+        "configured_model": configured_default or "(unset)",
+        "proxy_match": proxy_match,
+        "expected_skills_dir": str(expected_skills_dir),
+        "skills_dir_exists": expected_skills_dir.is_dir(),
+        "skills_dir_mode": "hermes-default" if uses_default_skills_dir else "custom",
+        "legacy_skillclaw_skills_dir": str(_LEGACY_SKILLCLAW_SKILLS_DIR),
+        "legacy_skillclaw_skills_present": legacy_present,
+        "latest_backup": str(backup_path) if backup_path else "(none)",
+        "session_boundary_mode": "explicit headers if provided, proxy heuristics otherwise",
+        "issues": issues,
+        "notes": notes,
+        "next_steps": next_steps,
+    }
+
+
+def restore_hermes_config(backup_path: Path | None = None) -> dict[str, str]:
+    """Restore ~/.hermes/config.yaml from the latest or a specified backup."""
+    source = Path(backup_path).expanduser() if backup_path is not None else _latest_hermes_backup_path()
+    if source is None or not source.exists():
+        raise FileNotFoundError("No Hermes backup found")
+
+    text = source.read_text(encoding="utf-8")
+    target = _HERMES_HOME / "config.yaml"
+    _write_text_atomic(target, text, "Hermes config restore")
+    return {"source": str(source), "target": str(target)}
+
+
+def _prepare_hermes_skills_dir(cfg: "SkillClawConfig") -> None:
+    """Prepare the Hermes-local skill directory without touching other agents."""
+    target_dir = Path(str(getattr(cfg, "skills_dir", "") or _HERMES_SKILLS_DIR)).expanduser()
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    if target_dir != _HERMES_SKILLS_DIR:
+        logger.info(
+            "[ClawAdapter] Hermes uses custom skills dir: %s",
+            target_dir,
+        )
+        return
+
+    if not _LEGACY_SKILLCLAW_SKILLS_DIR.is_dir():
+        return
+
+    migrated = _copy_missing_skill_dirs(_LEGACY_SKILLCLAW_SKILLS_DIR, target_dir)
+    if migrated > 0:
+        logger.info(
+            "[ClawAdapter] migrated %d legacy SkillClaw skill(s) into Hermes skills dir",
+            migrated,
+        )
+
+
+def _copy_missing_skill_dirs(src_root: Path, dst_root: Path) -> int:
+    """Copy only skill folders that do not already exist in the destination."""
+    copied = 0
+    for entry in sorted(src_root.iterdir()):
+        if not entry.is_dir():
+            continue
+        src_skill_md = entry / "SKILL.md"
+        if not src_skill_md.is_file():
+            continue
+        dst_dir = dst_root / entry.name
+        dst_skill_md = dst_dir / "SKILL.md"
+        if dst_skill_md.exists():
+            continue
+        shutil.copytree(entry, dst_dir)
+        copied += 1
+    return copied
 
 
 # ------------------------------------------------------------------ #

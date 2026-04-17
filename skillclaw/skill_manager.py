@@ -187,12 +187,12 @@ class SkillManager:
         self._embedding_model = None
         self._skill_embeddings_cache: Optional[Dict] = None
 
-        # Monotonically-increasing counter. Incremented each time new skills are
-        # successfully added via add_skills(). This lets callers drop stale
-        # pre-evolution feedback snapshots after a skill library change.
+        # Monotonically-increasing counter. Incremented whenever the local
+        # skill library changes so callers can drop stale snapshots.
         self.generation: int = 0
 
         self.skills = self._load_skills()
+        self._skills_fingerprint = self._compute_skills_fingerprint()
         self._stats = self._load_stats()
         self._stats_dirty = 0
 
@@ -288,7 +288,7 @@ class SkillManager:
         """Scan skills_dir for */SKILL.md files and parse each into a flat collection."""
         result: Dict[str, Any] = {"all_skills": []}
 
-        paths = sorted(glob.glob(os.path.join(self._skills_dir, "*", "SKILL.md")))
+        paths = self._skill_md_paths()
         if not paths:
             logger.warning("[SkillManager] no SKILL.md files found in %s", self._skills_dir)
             return result
@@ -301,15 +301,64 @@ class SkillManager:
 
         return result
 
+    def _skill_md_paths(self) -> list[str]:
+        if self._is_hermes_skill_root():
+            pattern = os.path.join(self._skills_dir, "**", "SKILL.md")
+            return sorted(glob.glob(pattern, recursive=True))
+        pattern = os.path.join(self._skills_dir, "*", "SKILL.md")
+        return sorted(glob.glob(pattern))
+
+    def _compute_skills_fingerprint(self) -> tuple[tuple[str, int, int], ...]:
+        fingerprint: list[tuple[str, int, int]] = []
+        for path in self._skill_md_paths():
+            try:
+                stat = os.stat(path)
+            except OSError:
+                continue
+            fingerprint.append(
+                (
+                    os.path.realpath(path),
+                    int(stat.st_mtime_ns),
+                    int(stat.st_size),
+                )
+            )
+        return tuple(fingerprint)
+
+    def _is_hermes_skill_root(self) -> bool:
+        return os.path.realpath(self._skills_dir) == os.path.realpath(
+            os.path.join(os.path.expanduser("~"), ".hermes", "skills")
+        )
+
+    def _skill_dir_path(self, skill: dict) -> str:
+        name = str(skill.get("name", "unknown") or "unknown").strip()
+        category = str(skill.get("category", "general") or "general").strip()
+        if self._is_hermes_skill_root() and category and category != "general":
+            return os.path.join(self._skills_dir, category, name)
+        return os.path.join(self._skills_dir, name)
+
+    def _skill_md_path(self, skill: dict) -> str:
+        return os.path.join(self._skill_dir_path(skill), "SKILL.md")
+
     def reload(self) -> None:
         """Re-scan the skills directory and rebuild the internal skill bank."""
         self._save_stats()
         self.skills = self._load_skills()
+        self._skills_fingerprint = self._compute_skills_fingerprint()
         self._stats = self._load_stats()
         self._skill_embeddings_cache = None
         if self.retrieval_mode == "embedding":
             self._compute_skill_embeddings()
         logger.info("[SkillManager] reloaded skills from %s", self._skills_dir)
+
+    def refresh_if_changed(self) -> bool:
+        """Reload skills if the on-disk skill library changed externally."""
+        current = self._compute_skills_fingerprint()
+        if current == self._skills_fingerprint:
+            return False
+        self.reload()
+        self.generation += 1
+        logger.info("[SkillManager] detected local skill changes; refreshed library")
+        return True
 
     # ------------------------------------------------------------------ #
     # Embedding helpers                                                    #
@@ -638,14 +687,13 @@ class SkillManager:
         if "id" not in clean_skill:
             clean_skill["id"] = hashlib.sha256(name.encode()).hexdigest()[:12]
         if "file_path" not in clean_skill:
-            clean_skill["file_path"] = os.path.realpath(
-                os.path.join(self._skills_dir, name, "SKILL.md")
-            )
+            clean_skill["file_path"] = os.path.realpath(self._skill_md_path(clean_skill))
         clean_skill["category"] = str(clean_skill.get("category", "general") or "general").strip()
         self.skills.setdefault("all_skills", []).append(clean_skill)
 
         self._skill_embeddings_cache = None
         self._write_skill_md(clean_skill)
+        self._skills_fingerprint = self._compute_skills_fingerprint()
         logger.info("[SkillManager] added skill: %s", name)
         return True
 
@@ -731,13 +779,13 @@ class SkillManager:
         existing SKILL.md are preserved in the output.
         """
         name = skill.get("name", "unknown")
-        skill_dir = os.path.join(self._skills_dir, name)
+        skill_dir = self._skill_dir_path(skill)
         canonical = os.path.realpath(skill_dir)
         if not canonical.startswith(os.path.realpath(self._skills_dir) + os.sep):
             logger.warning("[SkillManager] blocked path traversal in skill name: %s", name)
             return
         os.makedirs(skill_dir, exist_ok=True)
-        filepath = os.path.join(skill_dir, "SKILL.md")
+        filepath = self._skill_md_path(skill)
 
         category = skill.get("category", "general")
         content = skill.get("content", "")
@@ -761,6 +809,7 @@ class SkillManager:
         try:
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(text)
+            skill["file_path"] = os.path.realpath(filepath)
             logger.info("[SkillManager] wrote skill file: %s", filepath)
         except OSError as e:
             logger.warning("[SkillManager] could not write %s: %s", filepath, e)
@@ -775,6 +824,7 @@ class SkillManager:
         all_skills = list(self.skills.get("all_skills", []))
         for skill in all_skills:
             self._write_skill_md(skill)
+        self._skills_fingerprint = self._compute_skills_fingerprint()
         logger.info("[SkillManager] saved %d skills to %s", len(all_skills), self._skills_dir)
 
     def _get_all_skill_names(self) -> set:

@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .claw_adapter import CLAW_TYPES
-from .config_store import CONFIG_DIR, ConfigStore
+from .config_store import CONFIG_DIR, ConfigStore, resolve_skills_dir
 
 _PROVIDER_PRESETS = {
     "kimi": {
@@ -199,14 +199,23 @@ class SetupWizard:
         # ---- Skills ----
         print("\n--- Skills Configuration ---")
         current_skills = existing.get("skills", {})
+        default_skills_dir = resolve_skills_dir(
+            current_skills.get("dir", str(CONFIG_DIR / "skills")),
+            claw_type=claw_type,
+        )
+        if claw_type == "hermes":
+            print(
+                "Hermes shares its local skill library with SkillClaw by default.\n"
+                f"Recommended directory: {default_skills_dir}"
+            )
         skills_enabled = _prompt_bool(
             "Enable skill injection", default=current_skills.get("enabled", True)
         )
-        default_skills_dir = str(CONFIG_DIR / "skills")
         skills_dir = _prompt(
             "Skills directory",
-            default=current_skills.get("dir", default_skills_dir),
+            default=default_skills_dir,
         )
+        skills_dir = str(Path(skills_dir).expanduser())
 
         # ---- PRM ----
         print("\n--- PRM (Quality Scoring) ---")

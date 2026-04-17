@@ -20,8 +20,9 @@ import json
 import logging
 import os
 import shutil
+import glob
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Collection, Optional
 
 from .object_store import build_object_store, is_not_found_error
 
@@ -34,6 +35,28 @@ def _compute_sha256(path: str) -> str:
         for chunk in iter(lambda: f.read(8192), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _is_hermes_skill_root(skills_dir: str) -> bool:
+    return os.path.realpath(skills_dir) == os.path.realpath(
+        os.path.join(os.path.expanduser("~"), ".hermes", "skills")
+    )
+
+
+def _skill_dir_for_root(skills_dir: str, skill_name: str, category: str = "general") -> str:
+    if _is_hermes_skill_root(skills_dir) and category and category != "general":
+        return os.path.join(skills_dir, category, skill_name)
+    return os.path.join(skills_dir, skill_name)
+
+
+def _category_from_skill_path(skills_dir: str, skill_md_path: str) -> str:
+    if not _is_hermes_skill_root(skills_dir):
+        return "general"
+    rel = os.path.relpath(skill_md_path, skills_dir)
+    parts = rel.split(os.sep)
+    if len(parts) >= 3:
+        return str(parts[0] or "general")
+    return "general"
 
 
 class SkillHub:
@@ -164,9 +187,10 @@ class SkillHub:
 
         Returns {"uploaded": N, "skipped": M, "filtered": F, "total_local": T}.
         """
-        import glob
-
-        paths = sorted(glob.glob(os.path.join(skills_dir, "*", "SKILL.md")))
+        if _is_hermes_skill_root(skills_dir):
+            paths = sorted(glob.glob(os.path.join(skills_dir, "**", "SKILL.md"), recursive=True))
+        else:
+            paths = sorted(glob.glob(os.path.join(skills_dir, "*", "SKILL.md")))
         if not paths:
             logger.info("[SkillHub] no local skills to push")
             return {"uploaded": 0, "skipped": 0, "filtered": 0, "total_local": 0}
@@ -213,6 +237,7 @@ class SkillHub:
                 "uploaded_at": datetime.now(timezone.utc).isoformat(),
             }
             self._enrich_manifest_entry(manifest[skill_name], path)
+            manifest[skill_name].setdefault("category", _category_from_skill_path(skills_dir, path))
             uploaded += 1
             logger.info("[SkillHub] pushed skill: %s", skill_name)
 
@@ -265,18 +290,75 @@ class SkillHub:
     # ------------------------------------------------------------------ #
 
     @staticmethod
-    def _list_local_skills(skills_dir: str) -> dict[str, str]:
-        """Return {skill_name: skill_dir} for local `<name>/SKILL.md` entries."""
-        out: dict[str, str] = {}
+    def _list_local_skill_dirs(skills_dir: str) -> dict[str, list[str]]:
+        """Return {skill_name: [skill_dir, ...]} for local `<name>/SKILL.md` entries."""
+        out: dict[str, list[str]] = {}
         if not os.path.isdir(skills_dir):
+            return out
+        if _is_hermes_skill_root(skills_dir):
+            for path in sorted(glob.glob(os.path.join(skills_dir, "**", "SKILL.md"), recursive=True)):
+                skill_dir = os.path.dirname(path)
+                name = os.path.basename(skill_dir)
+                out.setdefault(name, []).append(skill_dir)
             return out
         for entry in os.scandir(skills_dir):
             if not entry.is_dir():
                 continue
             skill_md = os.path.join(entry.path, "SKILL.md")
             if os.path.isfile(skill_md):
-                out[entry.name] = entry.path
+                out.setdefault(entry.name, []).append(entry.path)
         return out
+
+    @classmethod
+    def _list_local_skills(cls, skills_dir: str) -> dict[str, str]:
+        """Return {skill_name: skill_dir} for local `<name>/SKILL.md` entries."""
+        grouped = cls._list_local_skill_dirs(skills_dir)
+        return {name: dirs[-1] for name, dirs in grouped.items() if dirs}
+
+    @staticmethod
+    def _resolve_pull_target_dir(
+        skills_dir: str,
+        skill_name: str,
+        category: str,
+        local_dirs_by_name: dict[str, list[str]],
+    ) -> str:
+        target = _skill_dir_for_root(skills_dir, skill_name, category)
+        if not _is_hermes_skill_root(skills_dir):
+            return target
+
+        existing_dirs = local_dirs_by_name.get(skill_name) or []
+        if not existing_dirs:
+            return target
+
+        if str(category or "general").strip() == "general":
+            nested = [
+                path for path in existing_dirs
+                if len(os.path.relpath(path, skills_dir).split(os.sep)) >= 2
+            ]
+            if len(nested) == 1:
+                return nested[0]
+
+        target_real = os.path.realpath(target)
+        existing_real = [os.path.realpath(path) for path in existing_dirs]
+        if target_real in existing_real:
+            return target
+
+        return target
+
+    @staticmethod
+    def _remove_duplicate_local_skill_dirs(
+        skill_name: str,
+        keep_dir: str,
+        local_dirs_by_name: dict[str, list[str]],
+    ) -> None:
+        keep_real = os.path.realpath(keep_dir)
+        for skill_dir in local_dirs_by_name.get(skill_name) or []:
+            if os.path.realpath(skill_dir) == keep_real:
+                continue
+            if not os.path.isdir(skill_dir):
+                continue
+            shutil.rmtree(skill_dir)
+            logger.info("[SkillHub] removed duplicate local skill dir: %s", skill_dir)
 
     @staticmethod
     def _prune_backups(backup_root: str, prefix: str, keep: int = 3) -> None:
@@ -296,7 +378,12 @@ class SkillHub:
             except Exception:
                 pass
 
-    def pull_skills(self, skills_dir: str, mirror: bool = True) -> dict[str, Any]:
+    def pull_skills(
+        self,
+        skills_dir: str,
+        mirror: bool = True,
+        skip_names: Optional[Collection[str]] = None,
+    ) -> dict[str, Any]:
         """Mirror cloud skills to local directory with backup + rollback safety.
 
         Parameters
@@ -308,6 +395,8 @@ class SkillHub:
             not present in remote manifest are deleted. When ``False``, perform
             incremental pull only (download/update remote skills, never delete
             local extras).
+        skip_names:
+            Skill names to preserve from local disk during this pull.
 
         Returns:
             {
@@ -320,8 +409,14 @@ class SkillHub:
             }
         """
         os.makedirs(skills_dir, exist_ok=True)
-        local_skills = self._list_local_skills(skills_dir)
+        local_dirs_by_name = self._list_local_skill_dirs(skills_dir)
+        local_skills = {name: dirs[-1] for name, dirs in local_dirs_by_name.items() if dirs}
         manifest = self._load_remote_manifest()
+        skip_set = {
+            str(name or "").strip()
+            for name in (skip_names or [])
+            if str(name or "").strip()
+        }
         if not manifest:
             # Empty/failed manifest is treated as no-op to avoid accidental wipe.
             logger.warning(
@@ -344,14 +439,27 @@ class SkillHub:
 
         if not mirror:
             for name, rec in manifest.items():
-                local_dir = os.path.join(skills_dir, name)
+                category = str(rec.get("category", "general") or "general")
+                local_dir = self._resolve_pull_target_dir(
+                    skills_dir,
+                    name,
+                    category,
+                    local_dirs_by_name,
+                )
                 local_path = os.path.join(local_dir, "SKILL.md")
                 remote_sha = rec.get("sha256", "")
+
+                if name in skip_set and os.path.exists(local_path):
+                    skipped += 1
+                    self._remove_duplicate_local_skill_dirs(name, local_dir, local_dirs_by_name)
+                    logger.info("[SkillHub] preserved local skill during pull: %s", name)
+                    continue
 
                 if os.path.exists(local_path):
                     local_sha = _compute_sha256(local_path)
                     if local_sha == remote_sha:
                         skipped += 1
+                        self._remove_duplicate_local_skill_dirs(name, local_dir, local_dirs_by_name)
                         continue
 
                 try:
@@ -365,6 +473,7 @@ class SkillHub:
                 with open(local_path, "wb") as f:
                     f.write(content)
                 downloaded += 1
+                self._remove_duplicate_local_skill_dirs(name, local_dir, local_dirs_by_name)
                 logger.info("[SkillHub] pulled skill: %s", name)
 
             logger.info(
@@ -403,14 +512,33 @@ class SkillHub:
             }
 
         os.makedirs(staging_dir, exist_ok=True)
+        resolved_targets: dict[str, str] = {}
 
         try:
             for name, rec in manifest.items():
-                local_path = os.path.join(skills_dir, name, "SKILL.md")
-                staged_dir = os.path.join(staging_dir, name)
+                category = str(rec.get("category", "general") or "general")
+                target_dir = self._resolve_pull_target_dir(
+                    skills_dir,
+                    name,
+                    category,
+                    local_dirs_by_name,
+                )
+                resolved_targets[name] = target_dir
+                local_path = os.path.join(target_dir, "SKILL.md")
+                staged_dir = os.path.join(staging_dir, os.path.relpath(target_dir, skills_dir))
                 staged_path = os.path.join(staged_dir, "SKILL.md")
                 remote_sha = rec.get("sha256", "")
                 content: bytes
+
+                if name in skip_set and os.path.exists(local_path):
+                    with open(local_path, "rb") as f:
+                        content = f.read()
+                    skipped += 1
+                    os.makedirs(staged_dir, exist_ok=True)
+                    with open(staged_path, "wb") as f:
+                        f.write(content)
+                    logger.info("[SkillHub] preserved local skill during pull: %s", name)
+                    continue
 
                 if os.path.exists(local_path):
                     local_sha = _compute_sha256(local_path)
@@ -438,15 +566,24 @@ class SkillHub:
             remote_names = set(manifest.keys())
             local_names = set(local_skills.keys())
             for stale in sorted(local_names - remote_names):
-                shutil.rmtree(os.path.join(skills_dir, stale), ignore_errors=False)
+                shutil.rmtree(local_skills[stale], ignore_errors=False)
                 deleted += 1
 
             for name in sorted(remote_names):
-                src_dir = os.path.join(staging_dir, name)
-                dst_dir = os.path.join(skills_dir, name)
+                rec = manifest.get(name, {})
+                category = str(rec.get("category", "general") or "general")
+                dst_dir = resolved_targets.get(name) or self._resolve_pull_target_dir(
+                    skills_dir,
+                    name,
+                    category,
+                    local_dirs_by_name,
+                )
+                src_dir = os.path.join(staging_dir, os.path.relpath(dst_dir, skills_dir))
                 if os.path.isdir(dst_dir):
                     shutil.rmtree(dst_dir)
+                os.makedirs(os.path.dirname(dst_dir), exist_ok=True)
                 shutil.move(src_dir, dst_dir)
+                self._remove_duplicate_local_skill_dirs(name, dst_dir, local_dirs_by_name)
 
         except Exception as e:
             logger.warning("[SkillHub] mirror pull failed, restoring backup: %s", e)

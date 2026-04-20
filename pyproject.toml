@@ -61,3 +61,6 @@ line-length = 120
 [tool.ruff.lint]
 select = ["E", "F", "I"]
 ignore = ["E731", "F403", "F405"]
+
+[tool.uv]
+# Install with: uv sync --extra all

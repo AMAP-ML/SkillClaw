@@ -1,48 +1,25 @@
-# Python caches
+# Python
 __pycache__/
 *.py[cod]
-
-# Python packaging artifacts
 *.egg-info/
-.eggs/
-build/
 dist/
-pip-wheel-metadata/
+build/
+*.egg
 
-# Virtual environments
-.venv/
-venv/
-env/
-
-# Python tool caches
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.tox/
-.nox/
-.coverage
-htmlcov/
-
-# Local project data
+# Runtime data
 records/
-wandb/
-memory_data/skills/
-docs/superpowers/plans/
-frontend/wildclawbench-task-viewer/node_modules/
-frontend/wildclawbench-task-viewer/dist/
-
-# Local env files (never commit secrets)
-.env
-.env.*
-**/.env
-**/.env.*
-!.env.example
-!**/.env.example
-
-# Evolve server outputs
-evolve_processed.json
 evolve_history.jsonl
-evolve_server/mock/**/evolve_skill_registry.json
 
-.codex
+# OS
 .DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+*.env.local

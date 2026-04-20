@@ -1,0 +1,141 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 440" width="880" height="440">
+  <defs>
+    <linearGradient id="titleGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#D44040"/>
+      <stop offset="40%" stop-color="#F0B040"/>
+      <stop offset="100%" stop-color="#4A90D4"/>
+    </linearGradient>
+    <linearGradient id="glowLine" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="20%" stop-color="#F0CDCB"/>
+      <stop offset="50%" stop-color="#F5E6C8"/>
+      <stop offset="80%" stop-color="#C2D9F0"/>
+      <stop offset="100%" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <radialGradient id="warmAura" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#FCEAEA"/>
+      <stop offset="100%" stop-color="#FFFFFF"/>
+    </radialGradient>
+    <radialGradient id="coolAura" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#EBF4FF"/>
+      <stop offset="100%" stop-color="#FFFFFF"/>
+    </radialGradient>
+    <radialGradient id="coreGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#D4E8FA"/>
+      <stop offset="100%" stop-color="#EBF4FF"/>
+    </radialGradient>
+    <filter id="warmGlow">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="coolGlow">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <style>
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+    @keyframes flowDash{to{stroke-dashoffset:-20}}
+    @keyframes corePulse{0%,100%{opacity:.9}50%{opacity:1}}
+    @keyframes ring1{0%,100%{opacity:.12}50%{opacity:.06}}
+    @keyframes ring2{0%,100%{opacity:.06}50%{opacity:.03}}
+    @keyframes fadeX{0%,100%{opacity:.5}50%{opacity:.15}}
+    .node-warm{animation:pulse 2.5s ease-in-out infinite}
+    .node-cool{animation:pulse 2.5s ease-in-out infinite}
+    .flow-line{animation:flowDash 1.2s linear infinite}
+    .core-circle{animation:corePulse 3s ease-in-out infinite}
+    .ring1{animation:ring1 3s ease-in-out infinite}
+    .ring2{animation:ring2 3s ease-in-out infinite}
+    .x-mark{animation:fadeX 2s ease-in-out infinite}
+  </style>
+
+  <!-- Background -->
+  <rect width="880" height="440" rx="18" fill="#FFFFFF"/>
+  <rect width="880" height="440" rx="18" fill="none" stroke="#E2E8F0" stroke-width="1"/>
+
+  <!-- Title -->
+  <text x="440" y="40" text-anchor="middle" font-family="Inter,-apple-system,sans-serif" font-size="14" font-weight="800" letter-spacing="4" fill="url(#titleGrad)">THE SHIFT</text>
+
+  <!-- Divider line -->
+  <rect x="40" y="54" width="800" height="2" rx="1" fill="url(#glowLine)"/>
+
+  <!-- LEFT PANEL: BEFORE -->
+  <rect x="28" y="70" width="400" height="350" rx="16" fill="#FEF7F7" stroke="#F0CDCB" stroke-width="1.2"/>
+  <ellipse cx="228" cy="260" rx="170" ry="140" fill="url(#warmAura)"/>
+
+  <!-- Before tag -->
+  <rect x="50" y="88" width="80" height="26" rx="6" fill="#FCEAEA"/>
+  <text x="90" y="106" text-anchor="middle" font-family="Inter,sans-serif" font-size="11" font-weight="800" letter-spacing="2" fill="#D44040">BEFORE</text>
+
+  <!-- Before title -->
+  <text x="50" y="148" font-family="Inter,sans-serif" font-size="22" font-weight="900" fill="#B5302A">Experience Silos</text>
+
+  <!-- Before description -->
+  <text x="50" y="175" font-family="Inter,sans-serif" font-size="13" fill="#64748B">Each agent works alone. Knowledge is</text>
+  <text x="50" y="193" font-family="Inter,sans-serif" font-size="13" fill="#64748B">trapped &#8212; can&#39;t flow, can&#39;t be reused.</text>
+
+  <!-- Dashed lines to center -->
+  <line x1="140" y1="248" x2="228" y2="310" stroke="#F0CDCB" stroke-width="1.5" stroke-dasharray="5 8"/>
+  <line x1="316" y1="248" x2="228" y2="310" stroke="#F0CDCB" stroke-width="1.5" stroke-dasharray="5 8"/>
+  <line x1="140" y1="372" x2="228" y2="310" stroke="#F0CDCB" stroke-width="1.5" stroke-dasharray="5 8"/>
+  <line x1="316" y1="372" x2="228" y2="310" stroke="#F0CDCB" stroke-width="1.5" stroke-dasharray="5 8"/>
+
+  <!-- X mark -->
+  <text x="228" y="318" text-anchor="middle" font-family="Inter,sans-serif" font-size="28" font-weight="900" fill="#E8A0A0" class="x-mark">&#10005;</text>
+
+  <!-- Nodes -->
+  <circle cx="140" cy="248" r="28" fill="#FEF0F0" stroke="#E8A0A0" stroke-width="1.5" class="node-warm"/>
+  <text x="140" y="254" text-anchor="middle" font-family="Inter,sans-serif" font-size="16" font-weight="900" fill="#D44040">A</text>
+
+  <circle cx="316" cy="248" r="28" fill="#FEF0F0" stroke="#E8A0A0" stroke-width="1.5" class="node-warm" style="animation-delay:.3s"/>
+  <text x="316" y="254" text-anchor="middle" font-family="Inter,sans-serif" font-size="16" font-weight="900" fill="#D44040">B</text>
+
+  <circle cx="140" cy="372" r="28" fill="#FEF0F0" stroke="#E8A0A0" stroke-width="1.5" class="node-warm" style="animation-delay:.6s"/>
+  <text x="140" y="378" text-anchor="middle" font-family="Inter,sans-serif" font-size="16" font-weight="900" fill="#D44040">C</text>
+
+  <circle cx="316" cy="372" r="28" fill="#FEF0F0" stroke="#E8A0A0" stroke-width="1.5" class="node-warm" style="animation-delay:.9s"/>
+  <text x="316" y="378" text-anchor="middle" font-family="Inter,sans-serif" font-size="16" font-weight="900" fill="#D44040">D</text>
+
+
+  <!-- RIGHT PANEL: SKILLCLAW -->
+  <rect x="452" y="70" width="400" height="350" rx="16" fill="#F5F9FF" stroke="#C2D9F0" stroke-width="1.2"/>
+  <ellipse cx="652" cy="260" rx="170" ry="140" fill="url(#coolAura)"/>
+
+  <!-- After tag -->
+  <rect x="474" y="88" width="105" height="26" rx="6" fill="#E4F0FC"/>
+  <text x="526" y="106" text-anchor="middle" font-family="Inter,sans-serif" font-size="11" font-weight="800" letter-spacing="2" fill="#4A90D4">SKILLCLAW</text>
+
+  <!-- After title -->
+  <text x="474" y="148" font-family="Inter,sans-serif" font-size="22" font-weight="900" fill="#2B6FAC">Collective Evolution</text>
+
+  <!-- After description -->
+  <text x="474" y="175" font-family="Inter,sans-serif" font-size="13" fill="#64748B">Experience auto-extracted, continuously</text>
+  <text x="474" y="193" font-family="Inter,sans-serif" font-size="13" fill="#64748B">evolved, and instantly shared.</text>
+
+  <!-- Flow lines to Skill Core -->
+  <line x1="564" y1="248" x2="622" y2="298" stroke="#4A90D4" stroke-width="1.8" stroke-dasharray="6 4" opacity=".35" class="flow-line"/>
+  <line x1="740" y1="248" x2="682" y2="298" stroke="#4A90D4" stroke-width="1.8" stroke-dasharray="6 4" opacity=".35" class="flow-line" style="animation-delay:.3s"/>
+  <line x1="564" y1="372" x2="622" y2="322" stroke="#4A90D4" stroke-width="1.8" stroke-dasharray="6 4" opacity=".35" class="flow-line" style="animation-delay:.6s"/>
+  <line x1="740" y1="372" x2="682" y2="322" stroke="#4A90D4" stroke-width="1.8" stroke-dasharray="6 4" opacity=".35" class="flow-line" style="animation-delay:.9s"/>
+
+  <!-- Skill Core -->
+  <circle cx="652" cy="310" r="60" fill="none" stroke="#E4F0FC" stroke-width="1" class="ring2"/>
+  <circle cx="652" cy="310" r="48" fill="none" stroke="#C2D9F0" stroke-width="1" class="ring1"/>
+  <circle cx="652" cy="310" r="38" fill="url(#coreGrad)" stroke="#B8D4F0" stroke-width="2" class="core-circle" filter="url(#coolGlow)"/>
+  <text x="652" y="305" text-anchor="middle" font-family="Inter,sans-serif" font-size="13" font-weight="800" fill="#2B6FAC">Skill</text>
+  <text x="652" y="322" text-anchor="middle" font-family="Inter,sans-serif" font-size="13" font-weight="800" fill="#2B6FAC">Core</text>
+
+  <!-- Nodes -->
+  <circle cx="564" cy="248" r="28" fill="#EBF4FF" stroke="#B8D4F0" stroke-width="1.5" class="node-cool"/>
+  <text x="564" y="254" text-anchor="middle" font-family="Inter,sans-serif" font-size="16" font-weight="900" fill="#2B6FAC">A</text>
+
+  <circle cx="740" cy="248" r="28" fill="#EBF4FF" stroke="#B8D4F0" stroke-width="1.5" class="node-cool" style="animation-delay:.3s"/>
+  <text x="740" y="254" text-anchor="middle" font-family="Inter,sans-serif" font-size="16" font-weight="900" fill="#2B6FAC">B</text>
+
+  <circle cx="564" cy="372" r="28" fill="#EBF4FF" stroke="#B8D4F0" stroke-width="1.5" class="node-cool" style="animation-delay:.6s"/>
+  <text x="564" y="378" text-anchor="middle" font-family="Inter,sans-serif" font-size="16" font-weight="900" fill="#2B6FAC">C</text>
+
+  <circle cx="740" cy="372" r="28" fill="#EBF4FF" stroke="#B8D4F0" stroke-width="1.5" class="node-cool" style="animation-delay:.9s"/>
+  <circle cx="740" cy="372" r="35" fill="none" stroke="#E4F0FC" stroke-width="1"/>
+  <text x="740" y="378" text-anchor="middle" font-family="Inter,sans-serif" font-size="16" font-weight="900" fill="#2B6FAC">D</text>
+</svg>

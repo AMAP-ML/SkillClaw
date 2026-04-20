@@ -50,11 +50,10 @@ all = [
 [project.scripts]
 skillclaw = "skillclaw.cli:skillclaw"
 skillclaw-evolve-server = "evolve_server.__main__:main"
-skillclaw-agent-evolve-server = "agent_evolve_server.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["skillclaw*", "evolve_server*", "agent_evolve_server*"]
+include = ["skillclaw*", "evolve_server*"]
 
 [tool.ruff]
 line-length = 120
@@ -62,3 +61,6 @@ line-length = 120
 [tool.ruff.lint]
 select = ["E", "F", "I"]
 ignore = ["E731", "F403", "F405"]
+
+[tool.uv]
+# Install with: uv sync --extra all

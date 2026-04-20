@@ -14,21 +14,29 @@ from .config import SkillClawConfig
 
 CONFIG_DIR = Path.home() / ".skillclaw"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
+_DEFAULT_SKILLS_DIR = CONFIG_DIR / "skills"
+_DEFAULT_HERMES_SKILLS_DIR = Path.home() / ".hermes" / "skills"
+_DEFAULT_CODEX_SKILLS_DIR = Path.home() / ".codex" / "skills"
+_DEFAULT_CLAUDE_SKILLS_DIR = Path.home() / ".claude" / "skills"
 
 _DEFAULTS: dict = {
-    "mode": "skills_only",
     "llm": {
         "provider": "custom",
         "model_id": "",
         "api_base": "",
         "api_key": "",
     },
-    "proxy": {"port": 30000, "host": "0.0.0.0", "api_key": ""},
+    "proxy": {
+        "port": 30000,
+        "host": "0.0.0.0",
+        "api_key": "",
+        "served_model_name": "skillclaw-model",
+    },
     "claw_type": "openclaw",
     "configure_openclaw": True,
     "skills": {
         "enabled": True,
-        "dir": str(Path.home() / ".skillclaw" / "skills"),
+        "dir": str(_DEFAULT_SKILLS_DIR),
         "retrieval_mode": "template",
         "top_k": 6,
     },
@@ -46,13 +54,6 @@ _DEFAULTS: dict = {
         "model": "",
         "api_key": "",
     },
-    "opd": {
-        "enabled": False,
-        "teacher_url": "",
-        "teacher_model": "",
-        "teacher_api_key": "",
-        "kl_penalty_coef": 1.0,
-    },
     "sharing": {
         "enabled": False,
         "backend": "",
@@ -68,6 +69,14 @@ _DEFAULTS: dict = {
         "auto_pull_on_start": False,
         "push_min_injections": 5,
         "push_min_effectiveness": 0.3,
+    },
+    "validation": {
+        "enabled": False,
+        "mode": "replay",
+        "idle_after_seconds": 300,
+        "poll_interval_seconds": 60,
+        "max_jobs_per_day": 5,
+        "max_concurrency": 1,
     },
 }
 
@@ -121,6 +130,60 @@ def _infer_sharing_backend(sharing: dict[str, Any]) -> str:
     ):
         return "s3"
     return ""
+
+
+def _normalize_validation_mode(value: Any) -> str:
+    del value
+    return "replay"
+
+
+def default_skills_dir_for_claw(claw_type: str) -> Path:
+    """Return the default local skills directory for the selected agent."""
+    normalized = str(claw_type or "").strip().lower()
+    if normalized == "hermes":
+        return _DEFAULT_HERMES_SKILLS_DIR
+    if normalized == "codex":
+        return _DEFAULT_CODEX_SKILLS_DIR
+    if normalized == "claude":
+        return _DEFAULT_CLAUDE_SKILLS_DIR
+    return _DEFAULT_SKILLS_DIR
+
+
+def resolve_skills_dir(skills_dir: Any, *, claw_type: str) -> str:
+    """Normalize a configured skills dir, applying agent-native defaults.
+
+    Existing configs that still point at the old generic default are treated as
+    "unset" when an agent with a native skill directory is selected so
+    SkillClaw follows that agent's own skill library by default.
+    """
+    raw = str(skills_dir or "").strip()
+    generic_default = _DEFAULT_SKILLS_DIR.expanduser()
+    normalized_claw = str(claw_type or "").strip().lower()
+
+    if raw:
+        expanded = Path(raw).expanduser()
+        if normalized_claw in {"hermes", "codex", "claude"} and expanded == generic_default:
+            return str(default_skills_dir_for_claw(normalized_claw))
+        return str(expanded)
+
+    return str(default_skills_dir_for_claw(claw_type))
+
+
+def _default_served_model_name(llm_model_id: str) -> str:
+    """Return a safe proxy-facing model name for agent integrations.
+
+    GPT-5-style names trigger Hermes' Responses API mode. SkillClaw does not
+    want to expose the upstream model name directly because the proxy surface
+    may not match the upstream protocol. Use a stable proxy model name instead.
+    """
+    raw = str(llm_model_id or "").strip()
+    if not raw:
+        return "skillclaw-model"
+
+    normalized = raw.rsplit("/", 1)[-1].lower()
+    if normalized.startswith("gpt-5"):
+        return "skillclaw-model"
+    return raw
 
 
 class ConfigStore:
@@ -181,13 +244,13 @@ class ConfigStore:
         skills = data.get("skills", {})
         orouter = data.get("openrouter", {})
         prm = data.get("prm", {})
-        opd = data.get("opd", {})
         configure_openclaw = bool(data.get("configure_openclaw", True))
         raw_claw_type = str(data.get("claw_type", "openclaw") or "openclaw")
         if not configure_openclaw:
             raw_claw_type = "none"
 
         sharing = data.get("sharing", {})
+        validation = data.get("validation", {})
         sharing_backend = _infer_sharing_backend(sharing)
         sharing_endpoint = _first_non_empty(sharing, "endpoint")
         sharing_bucket = _first_non_empty(sharing, "bucket")
@@ -202,12 +265,12 @@ class ConfigStore:
         prm_model = str(prm.get("model", "") or llm_model_id or "gpt-5.2")
         prm_api_key = str(prm.get("api_key", "") or llm_api_key)
 
-        skills_dir = str(
-            Path(skills.get("dir", str(CONFIG_DIR / "skills"))).expanduser()
+        skills_dir = resolve_skills_dir(
+            skills.get("dir", str(_DEFAULT_SKILLS_DIR)),
+            claw_type=raw_claw_type,
         )
 
         return SkillClawConfig(
-            mode="skills_only",
             # LLM forwarding
             llm_provider=llm_provider,
             llm_api_base=llm_api_base,
@@ -224,7 +287,10 @@ class ConfigStore:
             proxy_port=proxy.get("port", 30000),
             proxy_host=proxy.get("host", "0.0.0.0"),
             proxy_api_key=str(proxy.get("api_key", "") or ""),
-            served_model_name=llm.get("model_id") or "skillclaw-model",
+            served_model_name=(
+                _first_non_empty(proxy, "served_model_name")
+                or _default_served_model_name(llm_model_id)
+            ),
             # Skills
             use_skills=bool(skills.get("enabled", True)),
             skills_dir=skills_dir,
@@ -238,12 +304,6 @@ class ConfigStore:
             prm_url=prm_url,
             prm_model=prm_model,
             prm_api_key=prm_api_key,
-            # OPD
-            use_opd=bool(opd.get("enabled", False)),
-            teacher_url=opd.get("teacher_url", ""),
-            teacher_model=opd.get("teacher_model", ""),
-            teacher_api_key=opd.get("teacher_api_key", ""),
-            kl_penalty_coef=float(opd.get("kl_penalty_coef", 1.0)),
             # Model
             model_name=llm.get("model_id") or "Qwen/Qwen3-4B",
             # Claw
@@ -264,6 +324,12 @@ class ConfigStore:
             sharing_auto_pull_on_start=bool(sharing.get("auto_pull_on_start", False)),
             sharing_push_min_injections=int(sharing.get("push_min_injections", 5)),
             sharing_push_min_effectiveness=float(sharing.get("push_min_effectiveness", 0.3)),
+            validation_enabled=bool(validation.get("enabled", False)),
+            validation_mode=_normalize_validation_mode(validation.get("mode", "replay")),
+            validation_idle_after_seconds=int(validation.get("idle_after_seconds", 300)),
+            validation_poll_interval_seconds=int(validation.get("poll_interval_seconds", 60)),
+            validation_max_jobs_per_day=int(validation.get("max_jobs_per_day", 5)),
+            validation_max_concurrency=max(1, int(validation.get("max_concurrency", 1))),
         )
 
     def describe(self) -> str:
@@ -272,9 +338,13 @@ class ConfigStore:
         llm = data.get("llm", {})
         skills = data.get("skills", {})
         prm = data.get("prm", {})
-        opd = data.get("opd", {})
+        claw_type = str(data.get("claw_type", "openclaw") or "openclaw")
+        effective_skills_dir = resolve_skills_dir(
+            skills.get("dir", str(_DEFAULT_SKILLS_DIR)),
+            claw_type=claw_type,
+        )
         lines = [
-            f"claw_type:       {data.get('claw_type', 'openclaw')}",
+            f"claw_type:       {claw_type}",
             f"llm.provider:    {llm.get('provider', '?')}",
             f"llm.model_id:    {llm.get('model_id', '?')}",
             f"llm.api_base:    {llm.get('api_base', '—') if llm.get('provider') != 'bedrock' else '(n/a)'}",
@@ -286,11 +356,11 @@ class ConfigStore:
             ] if llm.get('provider') == 'openrouter' else []),
             f"proxy.port:      {data.get('proxy', {}).get('port', 30000)}",
             f"skills.enabled:  {skills.get('enabled', True)}",
-            f"skills.dir:      {skills.get('dir', '?')}",
+            f"skills.dir:      {effective_skills_dir}",
             f"prm.enabled:     {prm.get('enabled', False)}",
-            f"opd.enabled:     {opd.get('enabled', False)}",
         ]
         sharing = data.get("sharing", {})
+        validation = data.get("validation", {})
         if sharing.get("enabled"):
             backend = _infer_sharing_backend(sharing) or "unknown"
             lines += [
@@ -313,4 +383,10 @@ class ConfigStore:
             ]
         else:
             lines.append(f"sharing.enabled: False")
+        lines += [
+            f"validation.enabled: {validation.get('enabled', False)}",
+            f"validation.mode: {_normalize_validation_mode(validation.get('mode', 'replay'))}",
+            f"validation.idle_after: {validation.get('idle_after_seconds', 300)}",
+            f"validation.poll_interval: {validation.get('poll_interval_seconds', 60)}",
+        ]
         return "\n".join(lines)

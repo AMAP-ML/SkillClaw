@@ -14,7 +14,7 @@ Installs the Python-side dependencies for SkillClaw's evolve servers from the
 current repository checkout.
 
 - `skillclaw-evolve-server` works after this install.
-- `skillclaw-agent-evolve-server` also needs the external OpenClaw binary:
+- To use the agent engine, also install the external OpenClaw binary:
     npm install -g openclaw
 
 Default install command:
@@ -22,8 +22,8 @@ Default install command:
 
 After install you can run:
   skillclaw-evolve-server --help
-  skillclaw-agent-evolve-server --help   # requires openclaw installed separately
   skillclaw-evolve-server --port 8787 --interval 300
+  skillclaw-evolve-server --engine agent --help   # requires openclaw installed separately
 EOF
 }
 
@@ -76,8 +76,8 @@ echo "[install_skillclaw_server] activate with:"
 echo "  source \"$VENV_DIR/bin/activate\""
 echo "[install_skillclaw_server] next steps:"
 echo "  skillclaw-evolve-server --help"
-echo "  skillclaw-agent-evolve-server --help    # requires openclaw installed separately"
 echo "  skillclaw-evolve-server --port 8787 --interval 300"
+echo "  skillclaw-evolve-server --engine agent --help    # requires openclaw installed separately"
 
 if [[ "$RUN_HELP" -eq 1 ]]; then
   echo
@@ -85,8 +85,8 @@ if [[ "$RUN_HELP" -eq 1 ]]; then
   skillclaw-evolve-server --help
   if command -v openclaw >/dev/null 2>&1; then
     echo
-    echo "[install_skillclaw_server] running: skillclaw-agent-evolve-server --help"
-    skillclaw-agent-evolve-server --help
+    echo "[install_skillclaw_server] running: skillclaw-evolve-server --engine agent --help"
+    skillclaw-evolve-server --engine agent --help
   else
     echo
     echo "[install_skillclaw_server] skipping agent help: openclaw is not installed"

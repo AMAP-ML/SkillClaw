@@ -2,7 +2,7 @@
 """
 SkillClaw service launcher.
 
-Starts the proxy, skill injection, optional PRM/teacher side channels,
+Starts the proxy, skill injection, optional PRM side channel,
 and client auto-configuration for the selected Claw agent.
 """
 
@@ -28,8 +28,10 @@ class SkillClawLauncher:
 
     def __init__(self, config_store: ConfigStore):
         self.cs = config_store
-        self._rollout_worker = None
+        self._api_server = None
         self._stop_event = threading.Event()
+        self._validation_worker = None
+        self._validation_task = None
 
     # ------------------------------------------------------------------ #
     # Public interface                                                     #
@@ -44,9 +46,14 @@ class SkillClawLauncher:
 
     def stop(self):
         self._stop_event.set()
-        if self._rollout_worker is not None:
+        if self._validation_worker is not None:
             try:
-                self._rollout_worker.stop()
+                self._validation_worker.stop()
+            except Exception:
+                pass
+        if self._api_server is not None:
+            try:
+                self._api_server.stop()
             except Exception:
                 pass
         _PID_FILE.unlink(missing_ok=True)
@@ -56,8 +63,8 @@ class SkillClawLauncher:
     # ------------------------------------------------------------------ #
 
     async def _run(self, cfg):
+        from .api_server import SkillClawAPIServer
         from .prm_scorer import PRMScorer
-        from .rollout import AsyncRolloutWorker
         from .skill_manager import SkillManager
 
         skill_manager: Optional[SkillManager] = None
@@ -133,17 +140,16 @@ class SkillClawLauncher:
             except Exception as e:
                 logger.warning("[Launcher] auto-pull failed: %s", e)
 
-        worker = AsyncRolloutWorker(
+        server = SkillClawAPIServer(
             config=cfg,
             sampling_client=None,
             skill_manager=skill_manager,
             prm_scorer=prm_scorer,
         )
-        worker.resume_submission()
-        worker.start()
-        self._rollout_worker = worker
+        server.start()
+        self._api_server = server
 
-        wait_until_ready = getattr(worker, "wait_until_ready", None)
+        wait_until_ready = getattr(server, "wait_until_ready", None)
         if callable(wait_until_ready) and wait_until_ready(timeout_s=30.0):
             logger.info("[Launcher] proxy ready at http://%s:%d", cfg.proxy_host, cfg.proxy_port)
         elif callable(wait_until_ready):
@@ -154,14 +160,35 @@ class SkillClawLauncher:
             )
         else:
             logger.info(
-                "[Launcher] rollout worker does not expose wait_until_ready(); skipping readiness wait"
+                "[Launcher] proxy server does not expose wait_until_ready(); skipping readiness wait"
             )
 
         from .claw_adapter import configure_claw
         configure_claw(cfg)
 
-        while not self._stop_event.is_set():
-            await asyncio.sleep(1.0)
+        if getattr(cfg, "validation_enabled", False):
+            try:
+                from .validation_worker import ValidationWorker
+
+                self._validation_worker = ValidationWorker(
+                    cfg,
+                    idle_provider=server,
+                )
+                self._validation_task = asyncio.create_task(self._validation_worker.run())
+                logger.info("[Launcher] background validation worker started")
+            except Exception as e:
+                logger.warning("[Launcher] failed to start validation worker: %s", e)
+
+        try:
+            while not self._stop_event.is_set():
+                await asyncio.sleep(1.0)
+        finally:
+            if self._validation_worker is not None:
+                self._validation_worker.stop()
+            if self._validation_task is not None:
+                await asyncio.gather(self._validation_task, return_exceptions=True)
+                self._validation_task = None
+            self._validation_worker = None
 
     # ------------------------------------------------------------------ #
     # PID / signals                                                        #

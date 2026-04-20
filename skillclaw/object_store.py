@@ -157,6 +157,9 @@ class S3ObjectStore:
     def put_object(self, key: str, data: bytes | str | io.IOBase) -> None:
         self._client.put_object(Bucket=self._bucket, Key=key, Body=_read_bytes(data))
 
+    def delete_object(self, key: str) -> None:
+        self._client.delete_object(Bucket=self._bucket, Key=key)
+
     def iter_objects(self, prefix: str = "") -> Iterator[ObjectInfo]:
         paginator = self._client.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=self._bucket, Prefix=prefix):
@@ -199,6 +202,9 @@ class OSSObjectStore:
             self._bucket.put_object(key, _read_bytes(data))
             return
         self._bucket.put_object(key, data)
+
+    def delete_object(self, key: str) -> None:
+        self._bucket.delete_object(key)
 
     def iter_objects(self, prefix: str = "") -> Iterator[ObjectInfo]:
         import oss2

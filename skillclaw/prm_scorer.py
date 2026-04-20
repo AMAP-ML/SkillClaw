@@ -9,7 +9,7 @@ Public API:
     scorer = PRMScorer(
         prm_url="https://api.openai.com/v1",
         prm_model="gpt-5.2",
-        api_key="sk-...",
+        api_key="your-openai-api-key",
         prm_m=3,
     )
     result = await scorer.evaluate(response_text, instruction_text)

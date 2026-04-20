@@ -54,6 +54,52 @@ def _clear_pid_if_matches(pid: int):
     runtime_state.clear_pid_if_matches(pid)
 
 
+def _echo_report(report: dict[str, object]) -> None:
+    ordered_keys = [
+        "status",
+        "integration_scope",
+        "config_path",
+        "config_exists",
+        "expected_model",
+        "configured_model",
+        "expected_base_url",
+        "configured_base_url",
+        "configured_provider",
+        "proxy_match",
+        "expected_skills_dir",
+        "skills_dir_exists",
+        "skills_dir_mode",
+        "legacy_skillclaw_skills_dir",
+        "legacy_skillclaw_skills_present",
+        "latest_backup",
+        "session_boundary_mode",
+    ]
+    list_keys = {"issues", "notes", "next_steps"}
+    emitted: set[str] = set()
+
+    for key in ordered_keys:
+        if key not in report:
+            continue
+        click.echo(f"{key}: {report[key]}")
+        emitted.add(key)
+
+    for key, value in report.items():
+        if key in emitted or key in list_keys:
+            continue
+        click.echo(f"{key}: {value}")
+
+    for key in ("issues", "notes", "next_steps"):
+        value = report.get(key)
+        if not isinstance(value, list):
+            continue
+        click.echo(f"{key}:")
+        if not value:
+            click.echo("  (none)")
+            continue
+        for item in value:
+            click.echo(f"  - {item}")
+
+
 def _healthz_ready(port: int, timeout: float = 0.5) -> bool:
     import urllib.request
 
@@ -225,7 +271,7 @@ def setup():
     help="Log file used with --daemon (default: ~/.skillclaw/skillclaw.log).",
 )
 def start(port: int | None, daemon: bool, log_file: str | None):
-    """Start SkillClaw (proxy + skill injection + optional PRM/OPD)."""
+    """Start SkillClaw (proxy + skill injection + optional PRM)."""
     import asyncio
     from .log_color import setup_logging
 
@@ -308,20 +354,14 @@ def stop():
 @skillclaw.command()
 def status():
     """Check whether SkillClaw is running."""
-    import os
-    from pathlib import Path
-
-    pid_file = Path.home() / ".skillclaw" / "skillclaw.pid"
-    if not pid_file.exists():
+    pid = _read_pid()
+    if pid is None:
         click.echo("SkillClaw: not running")
         return
 
-    try:
-        pid = int(pid_file.read_text().strip())
-        os.kill(pid, 0)
-    except (ProcessLookupError, ValueError):
+    if not _is_process_alive(pid):
         click.echo("SkillClaw: not running (stale PID file)")
-        pid_file.unlink(missing_ok=True)
+        _clear_pid()
         return
 
     cs = ConfigStore()
@@ -363,6 +403,160 @@ def config_cmd(key_or_action: str, value: str | None):
 
     cs.set(key_or_action, value)
     click.echo(f"Set {key_or_action} = {cs.get(key_or_action)}")
+
+
+@skillclaw.group()
+def doctor():
+    """Integration diagnostics."""
+
+
+@doctor.command(name="hermes")
+def doctor_hermes():
+    """Inspect the local Hermes integration state."""
+    from .claw_adapter import inspect_hermes_config
+
+    cs = ConfigStore()
+    if not cs.exists():
+        raise click.ClickException("No config file found. Run 'skillclaw setup' first.")
+
+    report = inspect_hermes_config(cs.to_skillclaw_config())
+    _echo_report(report)
+
+
+@doctor.command(name="codex")
+def doctor_codex():
+    """Inspect the local Codex integration state."""
+    from .claw_adapter import inspect_codex_config
+
+    cs = ConfigStore()
+    if not cs.exists():
+        raise click.ClickException("No config file found. Run 'skillclaw setup' first.")
+
+    report = inspect_codex_config(cs.to_skillclaw_config())
+    _echo_report(report)
+
+
+@doctor.command(name="claude")
+def doctor_claude():
+    """Inspect the local Claude Code integration state."""
+    from .claw_adapter import inspect_claude_config
+
+    cs = ConfigStore()
+    if not cs.exists():
+        raise click.ClickException("No config file found. Run 'skillclaw setup' first.")
+
+    report = inspect_claude_config(cs.to_skillclaw_config())
+    _echo_report(report)
+
+
+@skillclaw.group()
+def restore():
+    """Restore agent integration state from backups."""
+
+
+@restore.command(name="hermes")
+@click.option(
+    "--backup",
+    "backup_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=str),
+    default=None,
+    help="Restore from a specific backup file instead of the latest Hermes backup.",
+)
+def restore_hermes(backup_path: str | None):
+    """Restore ~/.hermes/config.yaml from a saved backup."""
+    from .claw_adapter import restore_hermes_config
+
+    try:
+        result = restore_hermes_config(
+            Path(backup_path).expanduser() if backup_path else None
+        )
+    except FileNotFoundError as exc:
+        raise click.ClickException(str(exc)) from None
+
+    click.echo(
+        f"Restored Hermes config: {result['target']} <- {result['source']}"
+    )
+
+
+@restore.command(name="codex")
+@click.option(
+    "--backup",
+    "backup_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=str),
+    default=None,
+    help="Restore from a specific backup file instead of the latest Codex backup.",
+)
+def restore_codex(backup_path: str | None):
+    """Restore ~/.codex/config.toml from a saved backup."""
+    from .claw_adapter import restore_codex_config
+
+    try:
+        result = restore_codex_config(
+            Path(backup_path).expanduser() if backup_path else None
+        )
+    except FileNotFoundError as exc:
+        raise click.ClickException(str(exc)) from None
+
+    click.echo(
+        f"Restored Codex config: {result['target']} <- {result['source']}"
+    )
+
+
+@restore.command(name="claude")
+@click.option(
+    "--backup",
+    "backup_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=str),
+    default=None,
+    help="Restore from a specific backup file instead of the latest Claude Code backup.",
+)
+def restore_claude(backup_path: str | None):
+    """Restore ~/.claude/settings.json from a saved backup."""
+    from .claw_adapter import restore_claude_config
+
+    try:
+        result = restore_claude_config(
+            Path(backup_path).expanduser() if backup_path else None
+        )
+    except FileNotFoundError as exc:
+        raise click.ClickException(str(exc)) from None
+
+    click.echo(
+        f"Restored Claude Code settings: {result['target']} <- {result['source']}"
+    )
+
+
+@skillclaw.group()
+def validation():
+    """Background validation commands."""
+
+
+@validation.command(name="status")
+def validation_status():
+    """Show background validation configuration and current availability."""
+    from .validation_worker import ValidationWorker
+
+    cs = ConfigStore()
+    cfg = cs.to_skillclaw_config()
+    worker = ValidationWorker(cfg)
+    snapshot = worker.status_snapshot()
+    for key, value in snapshot.items():
+        click.echo(f"{key}: {value}")
+
+
+@validation.command(name="run-once")
+@click.option("--force", is_flag=True, help="Run one validation poll even if the client is not idle.")
+def validation_run_once(force: bool):
+    """Run one background validation polling iteration."""
+    import asyncio
+    from .validation_worker import ValidationWorker
+
+    cs = ConfigStore()
+    cfg = cs.to_skillclaw_config()
+    worker = ValidationWorker(cfg)
+    result = asyncio.run(worker.run_once(force=force))
+    for key, value in result.items():
+        click.echo(f"{key}: {value}")
 
 
 @skillclaw.group()
@@ -526,298 +720,6 @@ def skills_list_remote():
             click.echo(f"    {desc}")
         click.echo(f"    by {by}  at {at}")
         click.echo()
-
-
-@skillclaw.group()
-def benchmark():
-    """Benchmark and cluster simulation commands."""
-
-
-@benchmark.command(name="run")
-@click.option(
-    "--config",
-    "config_path",
-    required=True,
-    type=click.Path(dir_okay=False, exists=True, path_type=str),
-    help="Path to benchmark YAML/JSON config.",
-)
-def benchmark_run(config_path: str):
-    """Run a benchmark or single-host multi-node cluster simulation."""
-    from .experiments.group_benchmark import run_benchmark_from_config
-
-    report = run_benchmark_from_config(config_path)
-    summary = report.get("summary", {})
-    gain = float(summary.get("absolute_gain", 0.0))
-    sign = "+" if gain >= 0 else ""
-
-    click.echo(f"Benchmark: {report.get('name', 'unknown')}")
-    click.echo(f"Train tasks: {report.get('train_task_count', 0)}")
-    click.echo(f"Eval tasks: {report.get('eval_task_count', 0)}")
-    cluster = report.get("cluster", {})
-    if cluster:
-        click.echo(
-            "Cluster: "
-            f"configured={cluster.get('configured_nodes', '?')} "
-            f"active={cluster.get('active_nodes', '?')} "
-            f"executor={cluster.get('executor', '?')}"
-        )
-    click.echo(
-        "Eval success: "
-        f"{summary.get('initial_eval_success_rate', 0.0):.3f} -> "
-        f"{summary.get('final_eval_success_rate', 0.0):.3f} "
-        f"(gain={sign}{gain:.3f})"
-    )
-    if "initial_eval_mean_score" in summary or "final_eval_mean_score" in summary:
-        score_gain = float(summary.get("mean_score_gain", 0.0))
-        score_sign = "+" if score_gain >= 0 else ""
-        click.echo(
-            "Eval score: "
-            f"{summary.get('initial_eval_mean_score', 0.0):.3f} -> "
-            f"{summary.get('final_eval_mean_score', 0.0):.3f} "
-            f"(gain={score_sign}{score_gain:.3f})"
-        )
-    click.echo(f"Report: {Path(report.get('workspace_dir', '.')) / 'report.json'}")
-
-
-@benchmark.command(name="run-humanizer")
-@click.option(
-    "--config",
-    "config_path",
-    required=True,
-    type=click.Path(dir_okay=False, exists=True, path_type=str),
-    help="Path to humanizer experiment YAML/JSON config.",
-)
-def benchmark_run_humanizer(config_path: str):
-    """Run the real OpenClaw humanizer support->evolve->query experiment."""
-    from .experiments.humanizer_experiment import run_humanizer_experiment_from_config
-
-    report = run_humanizer_experiment_from_config(config_path)
-    summary = report.get("summary", {})
-
-    click.echo(f"Experiment: {report.get('name', 'unknown')}")
-    click.echo(f"Devices: {report.get('devices', 0)}")
-    click.echo(f"Support tasks: {report.get('support_task_count', 0)}")
-    click.echo(f"Query tasks: {report.get('query_task_count', 0)}")
-    click.echo(
-        "Query success: "
-        f"{summary.get('baseline_success_rate', 0.0):.3f} -> "
-        f"{summary.get('post_success_rate', 0.0):.3f} "
-        f"(gain={summary.get('absolute_gain', 0.0):+.3f})"
-    )
-    click.echo(
-        "Judge mean score: "
-        f"{summary.get('baseline_mean_score', 0.0):.3f} -> "
-        f"{summary.get('post_mean_score', 0.0):.3f} "
-        f"(gain={summary.get('mean_score_gain', 0.0):+.3f})"
-    )
-    click.echo(
-        "Evolve: "
-        f"failed_turns={summary.get('failed_turns', 0)} "
-        f"skills_evolved={summary.get('skills_evolved', 0)}"
-    )
-    click.echo(f"Report: {Path(report.get('run_root', '.')) / 'report.json'}")
-
-
-@benchmark.command(name="run-wildclaw-transfer")
-@click.option(
-    "--config",
-    "config_path",
-    required=True,
-    type=click.Path(dir_okay=False, exists=True, path_type=str),
-    help="Path to WildClawBench transfer experiment YAML/JSON config.",
-)
-def benchmark_run_wildclaw_transfer(config_path: str):
-    """Run the 8-node WildClawBench transfer experiment."""
-    from .experiments.wildclawbench_transfer_experiment import (
-        run_wildclawbench_transfer_experiment_from_config,
-    )
-
-    report = run_wildclawbench_transfer_experiment_from_config(config_path)
-    baseline = report.get("arms", {}).get("baseline", {})
-    evolve = report.get("arms", {}).get("evolve_then_broadcast", {})
-    compare = report.get("compare", {})
-
-    click.echo(f"Experiment: {report.get('name', 'unknown')}")
-    click.echo(f"Model: {report.get('model', 'unknown')}")
-    click.echo(f"Devices: {report.get('devices', 0)}")
-    click.echo(f"Tasks: {report.get('task_count', 0)}")
-    click.echo(
-        "Eval success: "
-        f"{baseline.get('success_rate', 0.0):.3f} -> "
-        f"{evolve.get('success_rate', 0.0):.3f} "
-        f"(gain={compare.get('success_rate_gain', 0.0):+.3f})"
-    )
-    click.echo(
-        "Eval score: "
-        f"{baseline.get('mean_score', 0.0):.3f} -> "
-        f"{evolve.get('mean_score', 0.0):.3f} "
-        f"(gain={compare.get('mean_score_gain', 0.0):+.3f})"
-    )
-    click.echo(
-        "Evolution: "
-        f"skills_evolved={evolve.get('evolution', {}).get('skills_evolved', 0)} "
-        f"failed_turns={evolve.get('evolution', {}).get('failed_turns', 0)}"
-    )
-    click.echo(f"Report: {Path(report.get('run_root', '.')) / 'report.json'}")
-
-
-@benchmark.command(name="run-wildclawbench-batch-evolve")
-@click.option(
-    "--config",
-    "config_path",
-    required=True,
-    type=click.Path(dir_okay=False, exists=True, path_type=str),
-    help="Path to WildClawBench batch-evolve YAML/JSON config.",
-)
-def benchmark_run_wildclawbench_batch_evolve(config_path: str):
-    """Run the WildClawBench batch before/evolve/after experiment."""
-    from .experiments.wildclawbench_batch_evolve_experiment import (
-        run_wildclawbench_batch_evolve_experiment_from_config,
-    )
-
-    report = run_wildclawbench_batch_evolve_experiment_from_config(config_path)
-    before = report.get("arms", {}).get("before", {})
-    after = report.get("arms", {}).get("batch_evolve", {})
-    compare = report.get("compare", {})
-
-    click.echo(f"Experiment: {report.get('name', 'unknown')}")
-    click.echo(f"Agent model: {report.get('agent_model', 'unknown')}")
-    click.echo(f"Evolve model: {report.get('evolve_model', 'unknown')}")
-    click.echo(f"Tasks: {report.get('selection', {}).get('selection_count', 0)}")
-    click.echo(f"Concurrency: {report.get('concurrency', {}).get('devices', 0)}")
-    click.echo(
-        "Eval success: "
-        f"{before.get('success_rate', 0.0):.3f} -> "
-        f"{after.get('success_rate', 0.0):.3f} "
-        f"(gain={compare.get('success_rate_gain', 0.0):+.3f})"
-    )
-    click.echo(
-        "Eval score: "
-        f"{before.get('mean_score', 0.0):.3f} -> "
-        f"{after.get('mean_score', 0.0):.3f} "
-        f"(gain={compare.get('mean_score_gain', 0.0):+.3f})"
-    )
-    click.echo(
-        "Evolution: "
-        f"skills_evolved={int((report.get('skill_evolution', {}).get('summary') or {}).get('skills_evolved', 0))} "
-        f"failed_turns={int((report.get('skill_evolution', {}).get('summary') or {}).get('failed_turns', 0))}"
-    )
-    click.echo(f"Report: {Path(report.get('run_root', '.')) / 'report.json'}")
-
-
-@benchmark.command(name="run-wildclawbench-iterative-evolve")
-@click.option(
-    "--config",
-    "config_path",
-    required=True,
-    type=click.Path(dir_okay=False, exists=True, path_type=str),
-    help="Path to WildClawBench iterative evolve YAML/JSON config.",
-)
-def benchmark_run_wildclawbench_iterative_evolve(config_path: str):
-    """Run the WildClawBench iterative multi-round evolve experiment."""
-    from .experiments.wildclawbench_iterative_evolve import (
-        run_wildclawbench_iterative_evolve_from_config,
-    )
-
-    report = run_wildclawbench_iterative_evolve_from_config(config_path)
-    baseline = report.get("baseline", {})
-    final = report.get("final", {})
-
-    click.echo(f"Experiment: {report.get('name', 'unknown')}")
-    click.echo(f"Agent model: {report.get('agent_model', 'unknown')}")
-    click.echo(f"Evolve model: {report.get('evolve_model', 'unknown')}")
-    click.echo(f"Rounds: {report.get('rounds_completed', 0)} / {report.get('iterative_rounds', 0)}")
-    click.echo(
-        "Baseline score: "
-        f"{baseline.get('mean_score', 0.0):.3f} "
-        f"(success={baseline.get('success_rate', 0.0):.3f})"
-    )
-    click.echo(
-        "Final score: "
-        f"{final.get('mean_score', 0.0):.3f} "
-        f"(success={final.get('success_rate', 0.0):.3f})"
-    )
-    click.echo(
-        "Overall gain: "
-        f"score={final.get('score_gain_vs_baseline', 0.0):+.3f} "
-        f"success={final.get('success_gain_vs_baseline', 0.0):+.3f}"
-    )
-
-    trajectory = report.get("trajectory", {})
-    scores = trajectory.get("mean_scores", [])
-    if scores:
-        click.echo(f"Score trajectory: {' -> '.join(f'{s:.3f}' for s in scores)}")
-
-    click.echo(f"Report: {Path(report.get('run_root', '.')) / 'report.json'}")
-
-
-@benchmark.command(name="run-real-suite")
-@click.option(
-    "--config",
-    "config_path",
-    required=False,
-    type=click.Path(dir_okay=False, exists=True, path_type=str),
-    default=None,
-    help="Optional YAML/JSON config for the real OpenClaw regression suite.",
-)
-def benchmark_run_real_suite(config_path: str | None):
-    """Run a real OpenClaw + SkillClaw regression suite."""
-    from .experiments.openclaw_real_suite import run_openclaw_real_suite_from_config
-
-    report = run_openclaw_real_suite_from_config(config_path)
-    click.echo(f"Suite: {report.get('name', 'unknown')}")
-    click.echo(f"Workspace: {report.get('workspace_dir', '.')}")
-    click.echo(f"Skills dir: {report.get('skills_dir', '.')}")
-    click.echo(
-        "PRM probe: "
-        f"status={report.get('prm_probe', {}).get('http_status', '?')} "
-        f"score_line_count={report.get('prm_probe', {}).get('prm_record_count', 0)}"
-    )
-    click.echo(
-        "Evolution: "
-        f"skills_evolved={report.get('evolution', {}).get('summary', {}).get('skills_evolved', 0)} "
-        f"failed_turns={report.get('evolution', {}).get('summary', {}).get('failed_turns', 0)}"
-    )
-    click.echo(f"Report: {Path(report.get('run_root', '.')) / 'reports' / 'report.md'}")
-
-
-@benchmark.command(name="run-skill-evolve-validation")
-@click.option(
-    "--config",
-    "config_path",
-    required=True,
-    type=click.Path(dir_okay=False, exists=True, path_type=str),
-    help="Path to the skill-evolve validation YAML/JSON config.",
-)
-def benchmark_run_skill_evolve_validation(config_path: str):
-    """Run the targeted skill evolve validation experiments."""
-    from .experiments.skill_evolve_validation import (
-        run_skill_evolve_validation_from_config,
-    )
-
-    report = run_skill_evolve_validation_from_config(config_path)
-    click.echo(f"Experiment: {report.get('name', 'unknown')}")
-    click.echo(f"Agent model: {report.get('agent_model', 'unknown')}")
-    click.echo(f"Evolve model: {report.get('evolve_model', 'unknown')}")
-    case_study = (report.get("experiments") or {}).get("case_study") or {}
-    if case_study:
-        metric = case_study.get("primary_metric", {})
-        click.echo(
-            "Case study score: "
-            f"{float(metric.get('before', 0.0)):.3f} -> "
-            f"{float(metric.get('after', 0.0)):.3f} "
-            f"(gain={float(metric.get('gain', 0.0)):+.3f})"
-        )
-    mini_task = (report.get("experiments") or {}).get("mini_task") or {}
-    if mini_task:
-        metric = mini_task.get("primary_metric", {})
-        click.echo(
-            "Mini-task pass count: "
-            f"{int(metric.get('before', 0))} -> "
-            f"{int(metric.get('after', 0))} "
-            f"(gain={int(metric.get('gain', 0)):+d})"
-        )
-    click.echo(f"Report: {Path(report.get('run_root', '.')) / 'report.json'}")
 
 
 if __name__ == "__main__":

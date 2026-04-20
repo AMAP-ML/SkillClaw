@@ -9,8 +9,9 @@ import asyncio
 import json
 import logging
 
-from .config import EvolveServerConfig
-from .server import EvolveServer
+from .core.config import EvolveServerConfig
+from .engines.agent import AgentEvolveServer
+from .engines.workflow import EvolveServer
 
 logger = logging.getLogger("evolve_server")
 
@@ -27,6 +28,9 @@ def _build_config_from_args(args: argparse.Namespace) -> EvolveServerConfig:
             config = EvolveServerConfig.from_skillclaw_config(sc_config)
         except Exception as e:
             logger.warning("Could not load skillclaw config: %s — falling back to env", e)
+
+    if args.engine:
+        config.engine = args.engine
 
     if args.storage_backend:
         config.storage_backend = args.storage_backend
@@ -51,15 +55,50 @@ def _build_config_from_args(args: argparse.Namespace) -> EvolveServerConfig:
         config.group_id = args.group_id
     if args.model:
         config.llm_model = args.model
+    if args.llm_api_type:
+        config.llm_api_type = args.llm_api_type
     if args.interval:
         config.interval_seconds = args.interval
     if args.port:
         config.http_port = args.port
+    if args.publish_mode:
+        config.publish_mode = args.publish_mode
+    if args.use_skill_verifier is not None:
+        config.use_skill_verifier = args.use_skill_verifier
+    if args.skill_verifier_min_score is not None:
+        config.skill_verifier_min_score = args.skill_verifier_min_score
+    if args.validation_required_results is not None:
+        config.validation_required_results = args.validation_required_results
+    if args.validation_required_approvals is not None:
+        config.validation_required_approvals = args.validation_required_approvals
+    if args.validation_min_mean_score is not None:
+        config.validation_min_mean_score = args.validation_min_mean_score
+    if args.validation_max_rejections is not None:
+        config.validation_max_rejections = args.validation_max_rejections
+    if args.openclaw_bin:
+        config.openclaw_bin = args.openclaw_bin
+    if args.openclaw_home:
+        config.openclaw_home = args.openclaw_home
+    if args.agent_timeout:
+        config.agent_timeout = args.agent_timeout
+    if args.workspace_root:
+        config.workspace_root = args.workspace_root
+    if args.agents_md:
+        config.agents_md_path = args.agents_md
+    if args.fresh is not None:
+        config.fresh = args.fresh
+    config.__post_init__()
     return config
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="SkillClaw Evolve Server")
+    parser.add_argument(
+        "--engine",
+        choices=["workflow", "agent"],
+        default=None,
+        help="Evolution engine: fixed workflow or OpenClaw agent.",
+    )
     parser.add_argument("--once", action="store_true", help="Run once and exit")
     parser.add_argument("--mock", action="store_true",
                         help="Use local mock/ directory instead of remote object storage")
@@ -69,7 +108,64 @@ def main() -> None:
                         help="HTTP trigger port (enables HTTP server)")
     parser.add_argument("--interval", type=int, default=None,
                         help="Periodic interval in seconds")
+    parser.add_argument(
+        "--publish-mode",
+        choices=["direct", "validated"],
+        default=None,
+        help="Direct publish to skills/ or stage jobs for client-side validation before publish.",
+    )
+    skill_verifier_group = parser.add_mutually_exclusive_group()
+    skill_verifier_group.add_argument(
+        "--skill-verifier",
+        dest="use_skill_verifier",
+        action="store_true",
+        default=None,
+        help="Enable optional skill verification before upload (workflow engine only).",
+    )
+    skill_verifier_group.add_argument(
+        "--no-skill-verifier",
+        dest="use_skill_verifier",
+        action="store_false",
+        help="Disable optional skill verification before upload.",
+    )
+    parser.add_argument(
+        "--skill-verifier-min-score",
+        type=float,
+        default=None,
+        help="Minimum verifier score in [0, 1] required before a skill is uploaded.",
+    )
+    parser.add_argument(
+        "--validation-required-results",
+        type=int,
+        default=None,
+        help="Minimum client validation results required before a candidate skill is published.",
+    )
+    parser.add_argument(
+        "--validation-required-approvals",
+        type=int,
+        default=None,
+        help="Minimum accepted client validation results required before publish.",
+    )
+    parser.add_argument(
+        "--validation-min-mean-score",
+        type=float,
+        default=None,
+        help="Minimum mean client validation score in [0, 1] required before publish.",
+    )
+    parser.add_argument(
+        "--validation-max-rejections",
+        type=int,
+        default=None,
+        help="Reject the candidate once this many client validation rejections accumulate.",
+    )
     parser.add_argument("--model", type=str, default=None, help="LLM model to use")
+    parser.add_argument(
+        "--llm-api-type",
+        type=str,
+        default=None,
+        choices=["openai-completions", "anthropic-messages", "openai-responses", "google-generative-ai", "ollama"],
+        help="LLM provider API type. Primarily used by --engine agent.",
+    )
     parser.add_argument("--group-id", type=str, default=None, help="Shared storage group ID")
     parser.add_argument("--storage-backend", type=str, default=None, help="Storage backend: local, s3, or oss")
     parser.add_argument("--storage-endpoint", type=str, default=None)
@@ -85,7 +181,38 @@ def main() -> None:
     )
     parser.add_argument("--use-skillclaw-config", action="store_true",
                         help="Load shared storage and LLM settings from skillclaw's config store")
+    parser.add_argument("--openclaw-bin", type=str, default=None,
+                        help="Path to openclaw executable for --engine agent")
+    parser.add_argument("--openclaw-home", type=str, default=None,
+                        help="OPENCLAW_HOME directory for --engine agent")
+    fresh_group = parser.add_mutually_exclusive_group()
+    fresh_group.add_argument("--fresh", dest="fresh", action="store_true", default=None,
+                             help="Wipe agent state each cycle (agent engine only)")
+    fresh_group.add_argument("--no-fresh", dest="fresh", action="store_false",
+                             help="Preserve agent state across cycles (agent engine only)")
+    parser.add_argument("--agent-timeout", type=int, default=None,
+                        help="Agent execution timeout in seconds")
+    parser.add_argument("--workspace-root", type=str, default=None,
+                        help="Workspace directory for agent file operations")
+    parser.add_argument("--agents-md", type=str, default=None,
+                        help="Custom EVOLVE_AGENTS.md path for agent engine")
     parser.add_argument("--verbose", "-v", action="store_true")
+    return parser
+
+
+def _build_server(
+    config: EvolveServerConfig,
+    *,
+    mock: bool = False,
+    mock_root: str | None = None,
+):
+    if config.engine == "agent":
+        return AgentEvolveServer(config, mock=mock, mock_root=mock_root)
+    return EvolveServer(config, mock=mock, mock_root=mock_root)
+
+
+def main() -> None:
+    parser = build_parser()
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -118,7 +245,7 @@ def main() -> None:
                 )
                 raise SystemExit(1)
 
-    server = EvolveServer(config, mock=args.mock, mock_root=args.mock_root)
+    server = _build_server(config, mock=args.mock, mock_root=args.mock_root)
 
     if args.once or args.mock:
         summary = asyncio.run(server.run_once())

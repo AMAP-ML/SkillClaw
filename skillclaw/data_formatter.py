@@ -5,7 +5,6 @@ Data structures for conversation samples collected by the API proxy.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
@@ -21,5 +20,4 @@ class ConversationSample:
     reward: float
     prompt_text: str = ""
     response_text: str = ""
-    teacher_logprobs: Optional[list[float]] = None
     skill_generation: int = 0

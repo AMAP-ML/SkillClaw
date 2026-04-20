@@ -24,11 +24,6 @@ class SkillClawConfig:
     prm_m: int = 3
     prm_temperature: float = 0.6
     prm_max_new_tokens: int = 1024
-    use_opd: bool = False
-    teacher_url: str = ""
-    teacher_model: str = ""
-    teacher_api_key: str = ""
-    kl_penalty_coef: float = 1.0
 
     # ------------------------------------------------------------------ #
     # Skills                                                              #
@@ -51,15 +46,10 @@ class SkillClawConfig:
     # ------------------------------------------------------------------ #
     proxy_port: int = 30000
     proxy_host: str = "0.0.0.0"
-    served_model_name: str = "qwen3-4b"
+    served_model_name: str = "skillclaw-model"
     proxy_api_key: str = ""
     record_enabled: bool = True
     record_dir: str = "records/"
-
-    # ------------------------------------------------------------------ #
-    # Operating mode                                                      #
-    # ------------------------------------------------------------------ #
-    mode: str = "skills_only"
 
     # Which CLI agent to auto-configure on startup.
     claw_type: str = "openclaw"
@@ -100,6 +90,16 @@ class SkillClawConfig:
     sharing_auto_pull_on_start: bool = False
     sharing_push_min_injections: int = 5
     sharing_push_min_effectiveness: float = 0.3
+
+    # ------------------------------------------------------------------ #
+    # Background validation                                               #
+    # ------------------------------------------------------------------ #
+    validation_enabled: bool = False
+    validation_mode: str = "replay"
+    validation_idle_after_seconds: int = 300
+    validation_poll_interval_seconds: int = 60
+    validation_max_jobs_per_day: int = 5
+    validation_max_concurrency: int = 1
 
     # ------------------------------------------------------------------ #
     # Cloud / Bedrock                                                      #

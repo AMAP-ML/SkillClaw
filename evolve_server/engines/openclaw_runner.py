@@ -156,12 +156,16 @@ class OpenClawRunner:
         cmd = [
             self.openclaw_bin,
             "agent",
-            "--session-id", session_id,
-            "--agent", "main",
-            "--message", message,
+            "--session-id",
+            session_id,
+            "--agent",
+            "main",
+            "--message",
+            message,
             "--json",
             "--local",
-            "--timeout", str(self.timeout),
+            "--timeout",
+            str(self.timeout),
         ]
 
         env = self._build_env()
@@ -169,7 +173,9 @@ class OpenClawRunner:
         logger.info(
             "[OpenClawRunner] running: %s (fresh=%s, timeout=%ds, session=%s)",
             " ".join(cmd[:3] + ["..."]),
-            self.fresh, self.timeout, session_id,
+            self.fresh,
+            self.timeout,
+            session_id,
         )
 
         try:
@@ -194,7 +200,8 @@ class OpenClawRunner:
         if result.returncode != 0:
             logger.warning(
                 "[OpenClawRunner] agent exited with code %d\nstderr: %s",
-                result.returncode, (result.stderr or "")[:500],
+                result.returncode,
+                (result.stderr or "")[:500],
             )
         else:
             logger.info("[OpenClawRunner] agent completed successfully")

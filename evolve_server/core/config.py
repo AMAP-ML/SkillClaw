@@ -45,7 +45,15 @@ def _infer_storage_backend(endpoint: str, bucket: str, local_root: str) -> str:
         return backend
     if local_root:
         return "local"
-    if any(os.environ.get(name) for name in ("EVOLVE_OSS_ENDPOINT", "EVOLVE_OSS_BUCKET", "EVOLVE_OSS_KEY_ID", "EVOLVE_OSS_KEY_SECRET")):
+    if any(
+        os.environ.get(name)
+        for name in (
+            "EVOLVE_OSS_ENDPOINT",
+            "EVOLVE_OSS_BUCKET",
+            "EVOLVE_OSS_KEY_ID",
+            "EVOLVE_OSS_KEY_SECRET",
+        )
+    ):
         return "oss"
     if endpoint or bucket:
         return "s3"
@@ -232,19 +240,11 @@ class EvolveServerConfig:
         engine = _first_env("EVOLVE_ENGINE", default="workflow").strip().lower() or "workflow"
         storage_backend = str(getattr(config, "sharing_backend", "") or "").strip().lower()
         storage_endpoint = str(
-            getattr(config, "sharing_endpoint", "")
-            or getattr(config, "sharing_oss_endpoint", "")
-            or ""
+            getattr(config, "sharing_endpoint", "") or getattr(config, "sharing_oss_endpoint", "") or ""
         )
-        storage_bucket = str(
-            getattr(config, "sharing_bucket", "")
-            or getattr(config, "sharing_oss_bucket", "")
-            or ""
-        )
+        storage_bucket = str(getattr(config, "sharing_bucket", "") or getattr(config, "sharing_oss_bucket", "") or "")
         storage_access_key_id = str(
-            getattr(config, "sharing_access_key_id", "")
-            or getattr(config, "sharing_oss_access_key_id", "")
-            or ""
+            getattr(config, "sharing_access_key_id", "") or getattr(config, "sharing_oss_access_key_id", "") or ""
         )
         storage_secret_access_key = str(
             getattr(config, "sharing_secret_access_key", "")
@@ -281,7 +281,8 @@ class EvolveServerConfig:
 
         return cls(
             engine=engine,
-            storage_backend=storage_backend or ("local" if local_root else "s3" if (storage_bucket or storage_endpoint) else "oss"),
+            storage_backend=storage_backend
+            or ("local" if local_root else "s3" if (storage_bucket or storage_endpoint) else "oss"),
             storage_endpoint=storage_endpoint,
             storage_bucket=storage_bucket,
             storage_access_key_id=storage_access_key_id,

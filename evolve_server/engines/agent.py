@@ -15,8 +15,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from skillclaw.object_store import build_object_store
+
+from ..core.config import EvolveServerConfig
 from ..core.constants import SLUG_RE
 from ..core.llm_client import AsyncLLMClient
+from ..core.skill_registry import SkillIDRegistry
+from ..core.utils import build_skill_md
+from ..pipeline.summarizer import (
+    _extract_session_metadata,
+    build_session_trajectory,
+    summarize_sessions_parallel,
+)
 from ..storage.mock_bucket import LocalBucket
 from ..storage.oss_helpers import (
     delete_session_keys,
@@ -26,19 +36,9 @@ from ..storage.oss_helpers import (
     read_json_object,
     save_manifest,
 )
-from ..core.skill_registry import SkillIDRegistry
-from ..pipeline.summarizer import (
-    _extract_session_metadata,
-    build_session_trajectory,
-    summarize_sessions_parallel,
-)
-from ..core.utils import build_skill_md
-from skillclaw.object_store import build_object_store
-
-from .agents_md import load_agents_md
-from ..core.config import EvolveServerConfig
-from .openclaw_runner import OpenClawRunner
 from .agent_workspace import AgentWorkspace
+from .agents_md import load_agents_md
+from .openclaw_runner import OpenClawRunner
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +123,7 @@ class _AnthropicMessagesLLMClient:
                     return "".join(parts)
                 except Exception:
                     if attempt < max_retries - 1:
-                        wait = min(2 ** attempt + random.uniform(0, 1), 30)
+                        wait = min(2**attempt + random.uniform(0, 1), 30)
                         await asyncio.sleep(wait)
                         continue
                     raise
@@ -264,7 +264,8 @@ class AgentEvolveServer:
                 consumed_keys.append(key)
         logger.info(
             "[AgentEvolveServer] drained %d session(s) (%d keys found)",
-            len(sessions), len(keys),
+            len(sessions),
+            len(keys),
         )
         return sessions, consumed_keys
 
@@ -312,7 +313,10 @@ class AgentEvolveServer:
         save_manifest(self._bucket, self._prefix, manifest)
         logger.info(
             "[AgentEvolveServer] uploaded skill %s (id=%s, v%d) to %s",
-            name, skill_id, version, object_key,
+            name,
+            skill_id,
+            version,
+            object_key,
         )
 
     # ================================================================= #
@@ -338,7 +342,9 @@ class AgentEvolveServer:
         if not sessions:
             logger.info("[AgentEvolveServer] queue empty — nothing to process")
             return {
-                "sessions": 0, "skills_evolved": 0, "agent_returncode": None,
+                "sessions": 0,
+                "skills_evolved": 0,
+                "agent_returncode": None,
             }
 
         # ---- 1.5. summarize sessions -------------------------------- #
@@ -350,7 +356,8 @@ class AgentEvolveServer:
         #  the agent well within the context-window budget.
         await self._summarize_sessions(sessions)
         logger.info(
-            "[AgentEvolveServer] summarized %d session(s)", len(sessions),
+            "[AgentEvolveServer] summarized %d session(s)",
+            len(sessions),
         )
 
         # ---- 2. prepare workspace ------------------------------------ #
@@ -407,21 +414,27 @@ class AgentEvolveServer:
             try:
                 await self._call_storage(self._upload_skill, skill, action)
                 skills_evolved += 1
-                evolution_records.append({
-                    "action": action,
-                    "skill_name": name,
-                    "skill_id": self._id_registry.get_or_create(name),
-                    "version": self._id_registry.get_version(name),
-                    "source": "agent",
-                })
+                evolution_records.append(
+                    {
+                        "action": action,
+                        "skill_name": name,
+                        "skill_id": self._id_registry.get_or_create(name),
+                        "version": self._id_registry.get_version(name),
+                        "source": "agent",
+                    }
+                )
             except Exception as e:
                 logger.error(
-                    "[AgentEvolveServer] failed to upload skill '%s': %s", name, e,
+                    "[AgentEvolveServer] failed to upload skill '%s': %s",
+                    name,
+                    e,
                 )
 
         # ---- 7. finalize + ack --------------------------------------- #
         await self._call_storage(
-            self._id_registry.save_to_oss, self._bucket, self._prefix,
+            self._id_registry.save_to_oss,
+            self._bucket,
+            self._prefix,
         )
         await self._call_storage(delete_session_keys, self._bucket, session_keys)
 
@@ -438,9 +451,11 @@ class AgentEvolveServer:
         }
         self._append_history(summary)
         logger.info(
-            "[AgentEvolveServer] === cycle done: %d sessions, %d skills evolved "
-            "in %.1fs (agent exit=%d) ===",
-            len(sessions), skills_evolved, elapsed, result.returncode,
+            "[AgentEvolveServer] === cycle done: %d sessions, %d skills evolved in %.1fs (agent exit=%d) ===",
+            len(sessions),
+            skills_evolved,
+            elapsed,
+            result.returncode,
         )
         return summary
 
@@ -503,15 +518,19 @@ class AgentEvolveServer:
                 for name, e in entries.items()
             }
             pending_keys = await self._call_storage(
-                list_session_keys, self._bucket, self._prefix,
+                list_session_keys,
+                self._bucket,
+                self._prefix,
             )
-            return JSONResponse(content={
-                "running": self._running,
-                "pending_sessions": len(pending_keys),
-                "registered_skills": len(entries),
-                "skills": skill_summary,
-                "fresh_mode": self.config.fresh,
-            })
+            return JSONResponse(
+                content={
+                    "running": self._running,
+                    "pending_sessions": len(pending_keys),
+                    "registered_skills": len(entries),
+                    "skills": skill_summary,
+                    "fresh_mode": self.config.fresh,
+                }
+            )
 
         @app.get("/health")
         async def health():

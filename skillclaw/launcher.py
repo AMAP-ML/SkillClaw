@@ -86,6 +86,7 @@ class SkillClawLauncher:
 
         if cfg.use_prm and prm_provider == "bedrock" and prm_model:
             from .bedrock_client import BedrockChatClient
+
             prm_client = BedrockChatClient(
                 model_id=prm_model,
                 region=cfg.bedrock_region,
@@ -125,11 +126,14 @@ class SkillClawLauncher:
         if cfg.sharing_enabled and cfg.sharing_auto_pull_on_start:
             try:
                 from .skill_hub import SkillHub
+
                 hub = SkillHub.from_config(cfg)
                 result = hub.pull_skills(cfg.skills_dir)
                 logger.info(
                     "[Launcher] auto-pull: %d downloaded, %d unchanged, %d deleted",
-                    result["downloaded"], result["skipped"], result.get("deleted", 0),
+                    result["downloaded"],
+                    result["skipped"],
+                    result.get("deleted", 0),
                 )
                 if skill_manager is not None and (
                     result.get("downloaded", 0) > 0
@@ -159,11 +163,10 @@ class SkillClawLauncher:
                 cfg.proxy_port,
             )
         else:
-            logger.info(
-                "[Launcher] proxy server does not expose wait_until_ready(); skipping readiness wait"
-            )
+            logger.info("[Launcher] proxy server does not expose wait_until_ready(); skipping readiness wait")
 
         from .claw_adapter import configure_claw
+
         configure_claw(cfg)
 
         if getattr(cfg, "validation_enabled", False):

@@ -13,5 +13,5 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv python install 3.10
       - run: uv sync --extra all
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
+      - run: uvx ruff@0.12.2 check .
+      - run: uvx ruff@0.12.2 format --check .

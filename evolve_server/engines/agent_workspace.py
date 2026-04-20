@@ -160,7 +160,8 @@ class AgentWorkspace:
         # Write manifest
         manifest_path = self.root / "manifest.json"
         manifest_path.write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8",
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
         )
 
         # Write skill registry info (read-only reference for the agent)
@@ -201,9 +202,10 @@ class AgentWorkspace:
             logger.debug("[AgentWorkspace] wrote bootstrap %s", filename)
 
         logger.info(
-            "[AgentWorkspace] prepared: %d sessions, %d existing skills, "
-            "bootstrap files written in %s",
-            len(sessions), len(existing_skills), self.root,
+            "[AgentWorkspace] prepared: %d sessions, %d existing skills, bootstrap files written in %s",
+            len(sessions),
+            len(existing_skills),
+            self.root,
         )
 
     def snapshot_skills(self) -> dict[str, str]:
@@ -221,7 +223,8 @@ class AgentWorkspace:
         return snapshot
 
     def collect_changes(
-        self, before_snapshot: dict[str, str],
+        self,
+        before_snapshot: dict[str, str],
     ) -> list[dict[str, Any]]:
         """Compare current skills against *before_snapshot* and return changed/new skills.
 
@@ -244,15 +247,18 @@ class AgentWorkspace:
             parsed = parse_skill_content(name, raw_md)
 
             action = "create" if before_sha is None else "improve"
-            changes.append({
-                "name": name,
-                "action": action,
-                "skill": parsed,
-                "raw_md": raw_md,
-            })
+            changes.append(
+                {
+                    "name": name,
+                    "action": action,
+                    "skill": parsed,
+                    "raw_md": raw_md,
+                }
+            )
             logger.info(
                 "[AgentWorkspace] detected %s: skill '%s' (sha %s -> %s)",
-                action, name,
+                action,
+                name,
                 (before_sha or "new")[:12],
                 after_sha[:12],
             )

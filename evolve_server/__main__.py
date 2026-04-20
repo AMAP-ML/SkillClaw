@@ -100,14 +100,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Evolution engine: fixed workflow or OpenClaw agent.",
     )
     parser.add_argument("--once", action="store_true", help="Run once and exit")
-    parser.add_argument("--mock", action="store_true",
-                        help="Use local mock/ directory instead of remote object storage")
-    parser.add_argument("--mock-root", type=str, default=None,
-                        help="Custom root directory for mock mode")
-    parser.add_argument("--port", type=int, default=None,
-                        help="HTTP trigger port (enables HTTP server)")
-    parser.add_argument("--interval", type=int, default=None,
-                        help="Periodic interval in seconds")
+    parser.add_argument(
+        "--mock", action="store_true", help="Use local mock/ directory instead of remote object storage"
+    )
+    parser.add_argument("--mock-root", type=str, default=None, help="Custom root directory for mock mode")
+    parser.add_argument("--port", type=int, default=None, help="HTTP trigger port (enables HTTP server)")
+    parser.add_argument("--interval", type=int, default=None, help="Periodic interval in seconds")
     parser.add_argument(
         "--publish-mode",
         choices=["direct", "validated"],
@@ -179,23 +177,29 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Use a local directory as the evolve backend root",
     )
-    parser.add_argument("--use-skillclaw-config", action="store_true",
-                        help="Load shared storage and LLM settings from skillclaw's config store")
-    parser.add_argument("--openclaw-bin", type=str, default=None,
-                        help="Path to openclaw executable for --engine agent")
-    parser.add_argument("--openclaw-home", type=str, default=None,
-                        help="OPENCLAW_HOME directory for --engine agent")
+    parser.add_argument(
+        "--use-skillclaw-config",
+        action="store_true",
+        help="Load shared storage and LLM settings from skillclaw's config store",
+    )
+    parser.add_argument("--openclaw-bin", type=str, default=None, help="Path to openclaw executable for --engine agent")
+    parser.add_argument("--openclaw-home", type=str, default=None, help="OPENCLAW_HOME directory for --engine agent")
     fresh_group = parser.add_mutually_exclusive_group()
-    fresh_group.add_argument("--fresh", dest="fresh", action="store_true", default=None,
-                             help="Wipe agent state each cycle (agent engine only)")
-    fresh_group.add_argument("--no-fresh", dest="fresh", action="store_false",
-                             help="Preserve agent state across cycles (agent engine only)")
-    parser.add_argument("--agent-timeout", type=int, default=None,
-                        help="Agent execution timeout in seconds")
-    parser.add_argument("--workspace-root", type=str, default=None,
-                        help="Workspace directory for agent file operations")
-    parser.add_argument("--agents-md", type=str, default=None,
-                        help="Custom EVOLVE_AGENTS.md path for agent engine")
+    fresh_group.add_argument(
+        "--fresh",
+        dest="fresh",
+        action="store_true",
+        default=None,
+        help="Wipe agent state each cycle (agent engine only)",
+    )
+    fresh_group.add_argument(
+        "--no-fresh", dest="fresh", action="store_false", help="Preserve agent state across cycles (agent engine only)"
+    )
+    parser.add_argument("--agent-timeout", type=int, default=None, help="Agent execution timeout in seconds")
+    parser.add_argument(
+        "--workspace-root", type=str, default=None, help="Workspace directory for agent file operations"
+    )
+    parser.add_argument("--agents-md", type=str, default=None, help="Custom EVOLVE_AGENTS.md path for agent engine")
     parser.add_argument("--verbose", "-v", action="store_true")
     return parser
 
@@ -259,7 +263,10 @@ def main() -> None:
 
         async def _run_with_http():
             uv_config = uvicorn.Config(
-                app, host="0.0.0.0", port=config.http_port, log_level="info",
+                app,
+                host="0.0.0.0",
+                port=config.http_port,
+                log_level="info",
             )
             uv_server = uvicorn.Server(uv_config)
             await asyncio.gather(server.run_periodic(), uv_server.serve())

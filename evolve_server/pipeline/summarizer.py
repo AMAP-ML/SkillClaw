@@ -97,9 +97,7 @@ def _format_tool_calls(turn: dict) -> list[str]:
 
     leftover_errors = []
     called_names = {
-        (tc.get("function") or {}).get("name", "")
-        for tc in raw_calls[:_MAX_TOOLS_PER_STEP]
-        if isinstance(tc, dict)
+        (tc.get("function") or {}).get("name", "") for tc in raw_calls[:_MAX_TOOLS_PER_STEP] if isinstance(tc, dict)
     }
     for tname, errs in error_by_tool.items():
         if tname not in called_names:
@@ -180,7 +178,11 @@ def _build_rollout_trajectory(turns: list[dict], first_prompt: str) -> str:
 
 
 def _format_step(
-    turn: dict, step_num: int, first_prompt: str, *, show_prompt: bool,
+    turn: dict,
+    step_num: int,
+    first_prompt: str,
+    *,
+    show_prompt: bool,
 ) -> str:
     """Format a single step line for the trajectory."""
     prompt = _clip(turn.get("prompt_text", ""), _PROMPT_MAX)
@@ -297,14 +299,12 @@ def _build_session_payload(session: dict) -> dict[str, Any]:
         read_skills = t.get("read_skills") or []
         if read_skills:
             interaction["read_skills"] = [
-                s.get("skill_name", "") if isinstance(s, dict) else str(s or "")
-                for s in read_skills
+                s.get("skill_name", "") if isinstance(s, dict) else str(s or "") for s in read_skills
             ]
         modified_skills = t.get("modified_skills") or []
         if modified_skills:
             interaction["modified_skills"] = [
-                s.get("skill_name", "") if isinstance(s, dict) else str(s or "")
-                for s in modified_skills
+                s.get("skill_name", "") if isinstance(s, dict) else str(s or "") for s in modified_skills
             ]
         injected = t.get("injected_skills") or []
         if injected:
@@ -345,6 +345,7 @@ def _build_session_payload(session: dict) -> dict[str, Any]:
 #  Metadata extraction                                                 #
 # ------------------------------------------------------------------ #
 
+
 def _extract_session_metadata(session: dict) -> None:
     """Extract skill references and compute aggregate metrics for a session.
 
@@ -362,19 +363,11 @@ def _extract_session_metadata(session: dict) -> None:
 
     for turn in session.get("turns", []):
         for item in turn.get("read_skills") or []:
-            name = (
-                item.get("skill_name", "").strip()
-                if isinstance(item, dict)
-                else str(item or "").strip()
-            )
+            name = item.get("skill_name", "").strip() if isinstance(item, dict) else str(item or "").strip()
             if name:
                 skills.add(name)
         for item in turn.get("modified_skills") or []:
-            name = (
-                item.get("skill_name", "").strip()
-                if isinstance(item, dict)
-                else str(item or "").strip()
-            )
+            name = item.get("skill_name", "").strip() if isinstance(item, dict) else str(item or "").strip()
             if name:
                 skills.add(name)
         prm = turn.get("prm_score")
@@ -385,15 +378,14 @@ def _extract_session_metadata(session: dict) -> None:
 
     session["_skills_referenced"] = skills
     session["_prm_scores"] = prm_scores
-    session["_avg_prm"] = (
-        round(sum(prm_scores) / len(prm_scores), 3) if prm_scores else None
-    )
+    session["_avg_prm"] = round(sum(prm_scores) / len(prm_scores), 3) if prm_scores else None
     session["_has_tool_errors"] = has_tool_errors
 
 
 # ------------------------------------------------------------------ #
 #  Public API                                                          #
 # ------------------------------------------------------------------ #
+
 
 async def summarize_session(llm: AsyncLLMClient, session: dict) -> str:
     """Summarize an entire session via LLM (trajectory-aware)."""
@@ -460,15 +452,18 @@ async def summarize_sessions_parallel(
     debug_dir = _SUMMARIZER_DEBUG_DIR
     if debug_dir:
         import pathlib
+
         ddir = pathlib.Path(debug_dir) / "summarizer"
         ddir.mkdir(parents=True, exist_ok=True)
         for session in sessions:
             sid = session.get("session_id", "unknown").replace("/", "_")
             (ddir / f"{sid}_trajectory.txt").write_text(
-                session.get("_trajectory", ""), encoding="utf-8",
+                session.get("_trajectory", ""),
+                encoding="utf-8",
             )
             (ddir / f"{sid}_summary.txt").write_text(
-                session.get("_summary", ""), encoding="utf-8",
+                session.get("_summary", ""),
+                encoding="utf-8",
             )
             meta = {
                 "_skills_referenced": sorted(session.get("_skills_referenced") or []),
@@ -477,7 +472,8 @@ async def summarize_sessions_parallel(
                 "_prm_scores": session.get("_prm_scores"),
             }
             (ddir / f"{sid}_meta.json").write_text(
-                json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8",
+                json.dumps(meta, indent=2, ensure_ascii=False),
+                encoding="utf-8",
             )
         logger.info("[DebugDump] wrote summarizer artifacts to %s", ddir)
     # ------------------------------------------------------------------ #

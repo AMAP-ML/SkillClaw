@@ -36,9 +36,11 @@ _RESET = "\033[0m"
 # Pure helpers (no I/O)                                               #
 # ------------------------------------------------------------------ #
 
+
 def _sanitize_text(text: str) -> str:
     """Replace XML-like tags that may trigger content filters."""
     import re as _re
+
     # Replace <tool_call>...</tool_call> blocks with a neutral label
     text = _re.sub(r"<tool_call>.*?</tool_call>", "[tool_call block]", text, flags=_re.DOTALL)
     # Replace any remaining angle-bracket tags
@@ -110,6 +112,7 @@ def _majority_vote(scores: list[Optional[int]]) -> float:
 # PRMScorer class                                                      #
 # ------------------------------------------------------------------ #
 
+
 class PRMScorer:
     """
     Async PRM scorer using any OpenAI-compatible /v1/chat/completions API.
@@ -154,10 +157,7 @@ class PRMScorer:
             try:
                 from openai import OpenAI
             except ImportError as e:
-                raise ImportError(
-                    "PRMScorer requires the 'openai' package. "
-                    "Install it with: pip install openai"
-                ) from e
+                raise ImportError("PRMScorer requires the 'openai' package. Install it with: pip install openai") from e
             base_url = prm_url.rstrip("/")
             client_kwargs: dict[str, Any] = {"api_key": api_key}
             client_kwargs["base_url"] = base_url
@@ -187,9 +187,7 @@ class PRMScorer:
         """
         msgs = _build_prm_judge_prompt(response, instruction)
 
-        results = await asyncio.gather(
-            *[self._query_once(msgs, i) for i in range(self.prm_m)]
-        )
+        results = await asyncio.gather(*[self._query_once(msgs, i) for i in range(self.prm_m)])
 
         scores = [r[0] for r in results]
         final = _majority_vote(scores)
@@ -208,9 +206,7 @@ class PRMScorer:
         )
         return {"score": final, "votes": votes_display, "eval_text": representative}
 
-    async def _query_once(
-        self, messages: list[dict], vote_id: int
-    ) -> tuple[Optional[int], str]:
+    async def _query_once(self, messages: list[dict], vote_id: int) -> tuple[Optional[int], str]:
         try:
             completion = await asyncio.to_thread(
                 self._client.chat.completions.create,

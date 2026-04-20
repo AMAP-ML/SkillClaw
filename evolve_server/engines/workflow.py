@@ -25,16 +25,21 @@ from typing import Any, Optional
 from skillclaw.object_store import build_object_store
 from skillclaw.validation_store import ValidationStore
 
-from ..pipeline.aggregation import aggregate_sessions_by_skill
 from ..core.config import EvolveServerConfig
-from ..core.constants import DecisionAction, NO_SKILL_KEY, SLUG_RE
+from ..core.constants import NO_SKILL_KEY, SLUG_RE, DecisionAction
+from ..core.llm_client import AsyncLLMClient
+from ..core.skill_registry import SkillIDRegistry
+from ..core.utils import build_skill_md, parse_skill_content
+from ..pipeline.aggregation import aggregate_sessions_by_skill
 from ..pipeline.execution import (
     create_skill_from_sessions,
     evolve_skill_from_sessions,
     execute_merge,
     set_evolve_debug_dir,
 )
-from ..core.llm_client import AsyncLLMClient
+from ..pipeline.session_judge import judge_sessions_parallel
+from ..pipeline.skill_verifier import verify_skill_candidate
+from ..pipeline.summarizer import set_summarizer_debug_dir, summarize_sessions_parallel
 from ..storage.oss_helpers import (
     delete_session_keys,
     fetch_skill_content,
@@ -43,11 +48,6 @@ from ..storage.oss_helpers import (
     read_json_object,
     save_manifest,
 )
-from ..pipeline.session_judge import judge_sessions_parallel
-from ..pipeline.skill_verifier import verify_skill_candidate
-from ..core.skill_registry import SkillIDRegistry
-from ..pipeline.summarizer import set_summarizer_debug_dir, summarize_sessions_parallel
-from ..core.utils import build_skill_md, parse_skill_content
 
 logger = logging.getLogger(__name__)
 
@@ -796,9 +796,7 @@ class EvolveServer:
 
         elapsed = round(time.monotonic() - started_at, 1)
         uploaded_skills = sum(1 for record in all_records if record.get("uploaded"))
-        queued_candidates = sum(
-            1 for record in all_records if record.get("action") == "queued_for_validation"
-        )
+        queued_candidates = sum(1 for record in all_records if record.get("action") == "queued_for_validation")
         published_after_validation = sum(
             1 for record in all_records if record.get("action") == "published_after_validation"
         )

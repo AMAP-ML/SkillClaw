@@ -24,8 +24,8 @@ except ImportError:
     print("SkillClaw requires 'click'. Install it with: pip install click")
     sys.exit(1)
 
-from .config_store import CONFIG_FILE, ConfigStore
 from . import runtime_state
+from .config_store import CONFIG_FILE, ConfigStore
 
 
 def _default_daemon_log_path() -> Path:
@@ -135,17 +135,12 @@ def _wait_for_daemon_ready(proc, port: int, log_path: Path, timeout_s: float = 1
     while time.monotonic() < deadline:
         returncode = proc.poll()
         if returncode is not None:
-            raise click.ClickException(
-                f"SkillClaw daemon exited with code {returncode}. Check logs: {log_path}"
-            )
+            raise click.ClickException(f"SkillClaw daemon exited with code {returncode}. Check logs: {log_path}")
         if _healthz_ready(port):
             return
         time.sleep(0.2)
 
-    raise click.ClickException(
-        "SkillClaw daemon did not become healthy in time. "
-        f"Check logs: {log_path}"
-    )
+    raise click.ClickException(f"SkillClaw daemon did not become healthy in time. Check logs: {log_path}")
 
 
 def _daemon_ready_timeout_seconds(default: float = 15.0) -> float:
@@ -191,9 +186,8 @@ def _spawn_daemon_process(
                     "env": child_env,
                 }
                 if os.name == "nt":
-                    creationflags = (
-                        getattr(subprocess, "DETACHED_PROCESS", 0)
-                        | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                    creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
+                        subprocess, "CREATE_NEW_PROCESS_GROUP", 0
                     )
                     if creationflags:
                         popen_kwargs["creationflags"] = creationflags
@@ -247,6 +241,7 @@ def skillclaw():
 def setup():
     """Interactive first-time configuration wizard."""
     from .setup_wizard import SetupWizard
+
     SetupWizard().run()
 
 
@@ -273,6 +268,7 @@ def setup():
 def start(port: int | None, daemon: bool, log_file: str | None):
     """Start SkillClaw (proxy + skill injection + optional PRM)."""
     import asyncio
+
     from .log_color import setup_logging
 
     setup_logging()
@@ -298,15 +294,15 @@ def start(port: int | None, daemon: bool, log_file: str | None):
         return
 
     if port:
-        from .config_store import ConfigStore as _CS
         import tempfile
+
         import yaml
+
+        from .config_store import ConfigStore as _CS
 
         data = cs.load()
         data.setdefault("proxy", {})["port"] = port
-        tmp = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yaml", delete=False, encoding="utf-8"
-        )
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False, encoding="utf-8")
         try:
             yaml.dump(data, tmp)
         finally:
@@ -317,6 +313,7 @@ def start(port: int | None, daemon: bool, log_file: str | None):
         tmp_path = None
 
     from .launcher import SkillClawLauncher
+
     launcher = SkillClawLauncher(cs)
     try:
         asyncio.run(launcher.start())
@@ -467,15 +464,11 @@ def restore_hermes(backup_path: str | None):
     from .claw_adapter import restore_hermes_config
 
     try:
-        result = restore_hermes_config(
-            Path(backup_path).expanduser() if backup_path else None
-        )
+        result = restore_hermes_config(Path(backup_path).expanduser() if backup_path else None)
     except FileNotFoundError as exc:
         raise click.ClickException(str(exc)) from None
 
-    click.echo(
-        f"Restored Hermes config: {result['target']} <- {result['source']}"
-    )
+    click.echo(f"Restored Hermes config: {result['target']} <- {result['source']}")
 
 
 @restore.command(name="codex")
@@ -491,15 +484,11 @@ def restore_codex(backup_path: str | None):
     from .claw_adapter import restore_codex_config
 
     try:
-        result = restore_codex_config(
-            Path(backup_path).expanduser() if backup_path else None
-        )
+        result = restore_codex_config(Path(backup_path).expanduser() if backup_path else None)
     except FileNotFoundError as exc:
         raise click.ClickException(str(exc)) from None
 
-    click.echo(
-        f"Restored Codex config: {result['target']} <- {result['source']}"
-    )
+    click.echo(f"Restored Codex config: {result['target']} <- {result['source']}")
 
 
 @restore.command(name="claude")
@@ -515,15 +504,11 @@ def restore_claude(backup_path: str | None):
     from .claw_adapter import restore_claude_config
 
     try:
-        result = restore_claude_config(
-            Path(backup_path).expanduser() if backup_path else None
-        )
+        result = restore_claude_config(Path(backup_path).expanduser() if backup_path else None)
     except FileNotFoundError as exc:
         raise click.ClickException(str(exc)) from None
 
-    click.echo(
-        f"Restored Claude Code settings: {result['target']} <- {result['source']}"
-    )
+    click.echo(f"Restored Claude Code settings: {result['target']} <- {result['source']}")
 
 
 @skillclaw.group()
@@ -549,6 +534,7 @@ def validation_status():
 def validation_run_once(force: bool):
     """Run one background validation polling iteration."""
     import asyncio
+
     from .validation_worker import ValidationWorker
 
     cs = ConfigStore()
@@ -597,38 +583,27 @@ def _require_sharing(cs: ConfigStore):
     backend = _sharing_backend(cfg)
     if backend == "local":
         if not cfg.sharing_local_root:
-            raise click.ClickException(
-                "Local sharing backend is not configured. "
-                "Set sharing.local_root first."
-            )
+            raise click.ClickException("Local sharing backend is not configured. Set sharing.local_root first.")
     elif backend == "s3":
         if not cfg.sharing_bucket:
-            raise click.ClickException(
-                "S3 bucket is not configured. "
-                "Set sharing.bucket first."
-            )
+            raise click.ClickException("S3 bucket is not configured. Set sharing.bucket first.")
         if not cfg.sharing_access_key_id or not cfg.sharing_secret_access_key:
             raise click.ClickException(
-                "S3 credentials are not configured. "
-                "Set sharing.access_key_id and sharing.secret_access_key."
+                "S3 credentials are not configured. Set sharing.access_key_id and sharing.secret_access_key."
             )
     elif backend == "oss":
         if not cfg.sharing_endpoint or not cfg.sharing_bucket:
             raise click.ClickException(
-                "OSS endpoint or bucket is not configured. "
-                "Set sharing.endpoint and sharing.bucket first."
+                "OSS endpoint or bucket is not configured. Set sharing.endpoint and sharing.bucket first."
             )
         if not cfg.sharing_access_key_id or not cfg.sharing_secret_access_key:
             raise click.ClickException(
-                "OSS credentials are not configured. "
-                "Set sharing.access_key_id and sharing.secret_access_key."
+                "OSS credentials are not configured. Set sharing.access_key_id and sharing.secret_access_key."
             )
     else:
-        raise click.ClickException(
-            "Sharing backend is not configured. "
-            "Set sharing.backend to local, s3, or oss."
-        )
+        raise click.ClickException("Sharing backend is not configured. Set sharing.backend to local, s3, or oss.")
     from .skill_hub import SkillHub
+
     hub = SkillHub.from_config(cfg)
     return cfg, hub
 
@@ -645,6 +620,7 @@ def skills_push(no_filter):
         stats_path = os.path.join(cfg.skills_dir, "skill_stats.json")
         if os.path.exists(stats_path):
             import json
+
             try:
                 with open(stats_path, encoding="utf-8") as f:
                     stats = json.load(f)
@@ -706,9 +682,9 @@ def skills_list_remote():
     if not remote:
         click.echo("No skills found on the cloud.")
         return
-    click.echo(f"\n{'='*60}")
+    click.echo(f"\n{'=' * 60}")
     click.echo(f"  Shared Skills ({len(remote)} total)")
-    click.echo(f"{'='*60}\n")
+    click.echo(f"{'=' * 60}\n")
     for rec in sorted(remote, key=lambda r: r.get("name", "")):
         name = rec.get("name", "?")
         desc = rec.get("description", "")

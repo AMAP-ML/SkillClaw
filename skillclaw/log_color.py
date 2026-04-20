@@ -54,17 +54,13 @@ def _colorize_message(message: str, *, level: str, logger_name: str) -> str:
     text = message
     if "tokenization_kimi" in logger_name and TOKENIZATION_KIMI_RELOADED_RE.search(text):
         return f"{ANSI_BOLD}{ANSI_BLUE}{text}{ANSI_RESET}"
-    if (
-        "tokenization_kimi" in logger_name
-        and (TOKENIZATION_KIMI_PLAIN_RE.search(text) or TOKENIZATION_KIMI_WORDS_PLAIN_RE.search(text))
+    if "tokenization_kimi" in logger_name and (
+        TOKENIZATION_KIMI_PLAIN_RE.search(text) or TOKENIZATION_KIMI_WORDS_PLAIN_RE.search(text)
     ):
         return text
     if "huggingface_hub.utils._http" in logger_name and HF_HUB_UNAUTH_PLAIN_RE.search(text):
         return text
-    if (
-        "tinker.lib.public_interfaces.service_client" in logger_name
-        and TINKER_CLIENT_INIT_PLAIN_RE.search(text)
-    ):
+    if "tinker.lib.public_interfaces.service_client" in logger_name and TINKER_CLIENT_INIT_PLAIN_RE.search(text):
         return text
     if "tinker.lib.telemetry" in logger_name and TINKER_TELEMETRY_EXCEPTION_PLAIN_RE.search(text):
         return text

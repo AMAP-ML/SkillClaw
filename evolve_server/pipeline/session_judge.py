@@ -178,11 +178,7 @@ def _looks_like_existing_session_level_turn_score(session: dict[str, Any]) -> bo
     # Be conservative: only treat the last-turn score as a benchmark-like
     # session score when the session also carries task/aggregate metadata
     # and there are no earlier PRM scores to suggest per-turn PRM usage.
-    has_benchmarkish_context = bool(
-        session.get("task_id")
-        or session.get("aggregate")
-        or session.get("phase")
-    )
+    has_benchmarkish_context = bool(session.get("task_id") or session.get("aggregate") or session.get("phase"))
     return has_benchmarkish_context and not earlier_scores
 
 

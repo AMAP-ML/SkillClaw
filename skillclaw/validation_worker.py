@@ -78,11 +78,7 @@ class ValidationWorker:
         self._stop_event.set()
 
     def _validation_enabled(self) -> bool:
-        return bool(
-            self.config.validation_enabled
-            and self.config.sharing_enabled
-            and self.config.sharing_group_id
-        )
+        return bool(self.config.validation_enabled and self.config.sharing_enabled and self.config.sharing_group_id)
 
     def _reset_daily_quota_if_needed(self) -> None:
         today = datetime.now(timezone.utc).date().isoformat()

@@ -12,6 +12,7 @@ SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,}$")
 
 class FailureType(IntEnum):
     """Five-way failure taxonomy for a bad turn."""
+
     SKILL_CONTENT_STALE = 1
     SKILL_MISSELECT = 2
     SKILL_GAP = 3
@@ -33,6 +34,7 @@ NO_SKILL_KEY = "__no_skill__"
 
 class DecisionAction:
     """Allowed evolution-decision action identifiers."""
+
     CREATE = "create_skill"
     IMPROVE = "improve_skill"
     OPTIMIZE_DESC = "optimize_description"

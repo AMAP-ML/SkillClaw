@@ -62,5 +62,8 @@ line-length = 120
 select = ["E", "F", "I"]
 ignore = ["E731", "F403", "F405"]
 
+[tool.ruff.lint.per-file-ignores]
+"evolve_server/pipeline/execution.py" = ["E501"]
+
 [tool.uv]
 # Install with: uv sync --extra all

@@ -1,6 +1,6 @@
 # Adapted from MetaClaw
-from typing import Any, Optional, TYPE_CHECKING
 import os
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from .config import SkillClawConfig
@@ -56,14 +56,10 @@ def run_llm(messages, config: Optional["SkillClawConfig"] = None):
 def _run_llm_bedrock(messages, config: Optional["SkillClawConfig"] = None):
     from .bedrock_client import BedrockChatClient
 
-    model_id = (
-        (getattr(config, "llm_model_id", "") if config else "")
-        or os.environ.get("BEDROCK_MODEL", "us.anthropic.claude-sonnet-4-6")
+    model_id = (getattr(config, "llm_model_id", "") if config else "") or os.environ.get(
+        "BEDROCK_MODEL", "us.anthropic.claude-sonnet-4-6"
     )
-    region = (
-        (getattr(config, "bedrock_region", "") if config else "")
-        or os.environ.get("BEDROCK_REGION", "us-east-1")
-    )
+    region = (getattr(config, "bedrock_region", "") if config else "") or os.environ.get("BEDROCK_REGION", "us-east-1")
     client = BedrockChatClient(model_id=model_id, region=region)
 
     rewrite_messages = [{"role": "system", "content": _COMPRESSION_INSTRUCTION}, *messages]
@@ -80,8 +76,7 @@ def _run_llm_openai(messages, config: Optional["SkillClawConfig"] = None):
         from openai import OpenAI
     except ImportError as e:
         raise ImportError(
-            "The openai provider requires the 'openai' package. "
-            "Install it with: pip install openai"
+            "The openai provider requires the 'openai' package. Install it with: pip install openai"
         ) from e
 
     api_base = ""

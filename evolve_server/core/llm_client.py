@@ -31,8 +31,8 @@ class AsyncLLMClient:
         max_tokens: int = 100000,
         temperature: float = 0.4,
     ) -> None:
-        from openai import OpenAI
         import httpx
+        from openai import OpenAI
 
         self._client = OpenAI(
             api_key=api_key or os.environ.get("OPENAI_API_KEY", ""),
@@ -58,7 +58,8 @@ class AsyncLLMClient:
         for attempt in range(max_retries):
             try:
                 resp = await asyncio.to_thread(
-                    self._client.chat.completions.create, **merged,
+                    self._client.chat.completions.create,
+                    **merged,
                 )
                 return resp.choices[0].message.content or ""
             except Exception as exc:
@@ -71,13 +72,15 @@ class AsyncLLMClient:
                     return await self._chat_via_stream(merged)
                 if attempt < max_retries - 1:
                     import random
-                    wait = min(2 ** attempt + random.uniform(0, 1), 30)
+
+                    wait = min(2**attempt + random.uniform(0, 1), 30)
                     await asyncio.sleep(wait)
                     continue
                 raise
 
     async def _chat_via_stream(self, body: dict[str, Any]) -> str:
         import json
+
         import httpx
 
         headers: dict[str, str] = {}

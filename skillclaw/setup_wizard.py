@@ -48,6 +48,7 @@ _PROVIDER_PRESETS = {
 
 def _prompt(msg: str, default: str = "", hide: bool = False) -> str:
     import getpass
+
     if default:
         display_default = "***" if hide else default
         full_msg = f"{msg} [{display_default}]: "
@@ -82,9 +83,7 @@ def _prompt_int(msg: str, default: int = 0) -> int:
 
 
 def _prompt_choice(msg: str, choices: list[str], default: str = "") -> str:
-    choices_str = "/".join(
-        f"[{c}]" if c == default else c for c in choices
-    )
+    choices_str = "/".join(f"[{c}]" if c == default else c for c in choices)
     while True:
         val = _prompt(f"{msg} ({choices_str})", default)
         if val in choices:
@@ -98,10 +97,7 @@ def _infer_existing_sharing_backend(current_sharing: dict) -> str:
         return backend
     if current_sharing.get("local_root"):
         return "local"
-    if any(
-        current_sharing.get(key)
-        for key in ("endpoint", "bucket", "access_key_id", "secret_access_key")
-    ):
+    if any(current_sharing.get(key) for key in ("endpoint", "bucket", "access_key_id", "secret_access_key")):
         return "s3"
     return "s3"
 
@@ -121,10 +117,7 @@ class SetupWizard:
 
         # ---- CLI agent (claw type) ----
         print("\n--- CLI Agent ---")
-        print(
-            "SkillClaw will auto-configure the chosen agent to route its LLM\n"
-            "calls through the SkillClaw proxy."
-        )
+        print("SkillClaw will auto-configure the chosen agent to route its LLM\ncalls through the SkillClaw proxy.")
         current_claw = existing.get("claw_type", "openclaw")
         claw_type = _prompt_choice(
             "CLI agent to configure",
@@ -209,18 +202,12 @@ class SetupWizard:
                 f"Recommended directory: {default_skills_dir}"
             )
         elif claw_type == "codex":
-            print(
-                "Codex reads native skills from ~/.codex/skills.\n"
-                f"Recommended directory: {default_skills_dir}"
-            )
+            print(f"Codex reads native skills from ~/.codex/skills.\nRecommended directory: {default_skills_dir}")
         elif claw_type == "claude":
             print(
-                "Claude Code reads native skills from ~/.claude/skills.\n"
-                f"Recommended directory: {default_skills_dir}"
+                f"Claude Code reads native skills from ~/.claude/skills.\nRecommended directory: {default_skills_dir}"
             )
-        skills_enabled = _prompt_bool(
-            "Enable skill injection", default=current_skills.get("enabled", True)
-        )
+        skills_enabled = _prompt_bool("Enable skill injection", default=current_skills.get("enabled", True))
         skills_dir = _prompt(
             "Skills directory",
             default=default_skills_dir,
@@ -344,10 +331,7 @@ class SetupWizard:
         # ---- Proxy port ----
         print("\n--- Proxy Configuration ---")
         current_proxy = existing.get("proxy", {})
-        default_served_model_name = str(
-            current_proxy.get("served_model_name")
-            or "skillclaw-model"
-        )
+        default_served_model_name = str(current_proxy.get("served_model_name") or "skillclaw-model")
         served_model_name = _prompt(
             "Proxy model name exposed to agents",
             default=default_served_model_name,

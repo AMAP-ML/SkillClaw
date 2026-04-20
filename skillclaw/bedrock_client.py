@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------ #
 # Response dataclasses (mimic openai.ChatCompletion)                   #
 # ------------------------------------------------------------------ #
+
 
 @dataclass
 class _Message:
@@ -67,6 +68,7 @@ class _ChatCompletion:
 # Completions / Chat namespace (duck-type openai.OpenAI().chat)        #
 # ------------------------------------------------------------------ #
 
+
 class _Completions:
     """Mimics ``openai.resources.chat.Completions``."""
 
@@ -98,10 +100,12 @@ class _Completions:
             if role == "system":
                 system_parts.append({"text": content})
             else:
-                converse_messages.append({
-                    "role": role,
-                    "content": [{"text": content}],
-                })
+                converse_messages.append(
+                    {
+                        "role": role,
+                        "content": [{"text": content}],
+                    }
+                )
 
         # Bedrock requires at least one user message
         if not converse_messages:
@@ -149,6 +153,7 @@ class _Chat:
 # Public class                                                         #
 # ------------------------------------------------------------------ #
 
+
 class BedrockChatClient:
     """
     Drop-in replacement for ``openai.OpenAI()`` that calls AWS Bedrock.
@@ -181,6 +186,7 @@ class BedrockChatClient:
         region: str = "us-east-1",
     ):
         import boto3
+
         self._boto_client = boto3.client("bedrock-runtime", region_name=region)
         self.model_id = model_id
         self._completions = _Completions(self._boto_client, model_id, region)

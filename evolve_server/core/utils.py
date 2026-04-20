@@ -8,10 +8,10 @@ import json
 import re
 from typing import Any, Optional
 
-
 # ------------------------------------------------------------------ #
 #  LLM output parsing                                                  #
 # ------------------------------------------------------------------ #
+
 
 def parse_single_skill(text: str) -> Optional[dict]:
     """Extract a single skill JSON object from LLM output."""
@@ -99,6 +99,7 @@ def compact_tool_observations(
 #  SKILL.md rendering                                                  #
 # ------------------------------------------------------------------ #
 
+
 def build_skill_md(skill: dict) -> str:
     """Render a skill dict into SKILL.md content (with YAML frontmatter)."""
     name = skill.get("name", "unknown")
@@ -106,7 +107,7 @@ def build_skill_md(skill: dict) -> str:
     category = skill.get("category", "general")
     content = skill.get("content", "")
 
-    needs_quoting = any(c in description for c in ':{}[],"\'#&*!|>%@`\n')
+    needs_quoting = any(c in description for c in ":{}[],\"'#&*!|>%@`\n")
     if needs_quoting:
         escaped = description.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
         desc_line = f'description: "{escaped}"'

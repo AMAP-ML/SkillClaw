@@ -200,6 +200,7 @@ class ConfigStore:
             return _deep_merge({}, _DEFAULTS)
         try:
             import yaml
+
             with open(self.config_file, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
             return _deep_merge(_DEFAULTS, data)
@@ -208,6 +209,7 @@ class ConfigStore:
 
     def save(self, data: dict):
         import yaml
+
         self.config_file.parent.mkdir(parents=True, exist_ok=True)
         with open(self.config_file, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
@@ -288,8 +290,7 @@ class ConfigStore:
             proxy_host=proxy.get("host", "0.0.0.0"),
             proxy_api_key=str(proxy.get("api_key", "") or ""),
             served_model_name=(
-                _first_non_empty(proxy, "served_model_name")
-                or _default_served_model_name(llm_model_id)
+                _first_non_empty(proxy, "served_model_name") or _default_served_model_name(llm_model_id)
             ),
             # Skills
             use_skills=bool(skills.get("enabled", True)),
@@ -348,12 +349,20 @@ class ConfigStore:
             f"llm.provider:    {llm.get('provider', '?')}",
             f"llm.model_id:    {llm.get('model_id', '?')}",
             f"llm.api_base:    {llm.get('api_base', '—') if llm.get('provider') != 'bedrock' else '(n/a)'}",
-            *([ f"llm.bedrock_region: {llm.get('bedrock_region', 'us-east-1')}" ] if llm.get('provider') == 'bedrock' else []),
-            *([
-                f"openrouter.route:    {data.get('openrouter', {}).get('route', 'fallback')}",
-                f"openrouter.fallback: {data.get('openrouter', {}).get('fallback_models', '') or '(none)'}",
-                f"openrouter.data:     {data.get('openrouter', {}).get('data_policy', '') or 'allow'}",
-            ] if llm.get('provider') == 'openrouter' else []),
+            *(
+                [f"llm.bedrock_region: {llm.get('bedrock_region', 'us-east-1')}"]
+                if llm.get("provider") == "bedrock"
+                else []
+            ),
+            *(
+                [
+                    f"openrouter.route:    {data.get('openrouter', {}).get('route', 'fallback')}",
+                    f"openrouter.fallback: {data.get('openrouter', {}).get('fallback_models', '') or '(none)'}",
+                    f"openrouter.data:     {data.get('openrouter', {}).get('data_policy', '') or 'allow'}",
+                ]
+                if llm.get("provider") == "openrouter"
+                else []
+            ),
             f"proxy.port:      {data.get('proxy', {}).get('port', 30000)}",
             f"skills.enabled:  {skills.get('enabled', True)}",
             f"skills.dir:      {effective_skills_dir}",
@@ -364,7 +373,7 @@ class ConfigStore:
         if sharing.get("enabled"):
             backend = _infer_sharing_backend(sharing) or "unknown"
             lines += [
-                f"sharing.enabled: True",
+                "sharing.enabled: True",
                 f"sharing.backend: {backend}",
             ]
             if backend == "local":
@@ -382,7 +391,7 @@ class ConfigStore:
                 f"sharing.auto_pull: {sharing.get('auto_pull_on_start', False)}",
             ]
         else:
-            lines.append(f"sharing.enabled: False")
+            lines.append("sharing.enabled: False")
         lines += [
             f"validation.enabled: {validation.get('enabled', False)}",
             f"validation.mode: {_normalize_validation_mode(validation.get('mode', 'replay'))}",

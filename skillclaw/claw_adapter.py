@@ -56,6 +56,7 @@ _CLAUDE_BACKUP_DIR = Path.home() / ".skillclaw" / "backups" / "claude"
 # Dispatcher                                                          #
 # ------------------------------------------------------------------ #
 
+
 def configure_claw(cfg: "SkillClawConfig") -> None:
     """Dispatch to the appropriate claw adapter based on cfg.claw_type."""
     claw = getattr(cfg, "claw_type", "openclaw")
@@ -67,9 +68,7 @@ def configure_claw(cfg: "SkillClawConfig") -> None:
 
     adapter = _ADAPTERS.get(claw)
     if adapter is None:
-        logger.warning(
-            "[ClawAdapter] Unknown claw_type=%r — skipping auto-configuration", claw
-        )
+        logger.warning("[ClawAdapter] Unknown claw_type=%r — skipping auto-configuration", claw)
         return
     adapter(cfg)
 
@@ -78,29 +77,32 @@ def configure_claw(cfg: "SkillClawConfig") -> None:
 # OpenClaw adapter                                                    #
 # ------------------------------------------------------------------ #
 
+
 def _configure_openclaw(cfg: "SkillClawConfig") -> None:
     """Auto-configure OpenClaw to use the SkillClaw proxy."""
     model_id = cfg.served_model_name or cfg.llm_model_id or "skillclaw-model"
-    provider_json = json.dumps({
-        "api": "openai-completions",
-        "baseUrl": f"http://127.0.0.1:{cfg.proxy_port}/v1",
-        "apiKey": cfg.proxy_api_key or "skillclaw",
-        "models": [{
-            "id": model_id,
-            "name": model_id,
-            "reasoning": False,
-            "input": ["text"],
-            "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-            "contextWindow": 32768,
-            "maxTokens": 8192,
-        }],
-    })
+    provider_json = json.dumps(
+        {
+            "api": "openai-completions",
+            "baseUrl": f"http://127.0.0.1:{cfg.proxy_port}/v1",
+            "apiKey": cfg.proxy_api_key or "skillclaw",
+            "models": [
+                {
+                    "id": model_id,
+                    "name": model_id,
+                    "reasoning": False,
+                    "input": ["text"],
+                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    "contextWindow": 32768,
+                    "maxTokens": 8192,
+                }
+            ],
+        }
+    )
 
     commands = [
-        ["openclaw", "config", "set", "models.providers.skillclaw",
-         "--json", provider_json],
-        ["openclaw", "config", "set", "agents.defaults.model.primary",
-         f"skillclaw/{model_id}"],
+        ["openclaw", "config", "set", "models.providers.skillclaw", "--json", provider_json],
+        ["openclaw", "config", "set", "agents.defaults.model.primary", f"skillclaw/{model_id}"],
         ["openclaw", "config", "set", "agents.defaults.sandbox.mode", "off"],
         ["openclaw", "gateway", "restart"],
     ]
@@ -110,6 +112,7 @@ def _configure_openclaw(cfg: "SkillClawConfig") -> None:
 # ------------------------------------------------------------------ #
 # Hermes adapter                                                      #
 # ------------------------------------------------------------------ #
+
 
 def _load_yaml_mapping(path: Path, label: str) -> dict:
     """Load a YAML mapping, falling back to an empty mapping."""
@@ -491,7 +494,8 @@ def inspect_hermes_config(cfg: "SkillClawConfig") -> dict[str, object]:
     issues: list[str] = []
     notes: list[str] = [
         "This integration only rewrites Hermes-local config and does not touch other claw adapters.",
-        "Hermes session capture still relies on explicit session headers when available, with proxy-side heuristics as the fallback.",
+        "Hermes session capture still relies on explicit session headers when"
+        " available, with proxy-side heuristics as the fallback.",
     ]
     next_steps: list[str] = []
 
@@ -505,10 +509,13 @@ def inspect_hermes_config(cfg: "SkillClawConfig") -> dict[str, object]:
         next_steps.append(f"Create or prepare the Hermes skills directory: {expected_skills_dir}")
     if legacy_present:
         notes.append(
-            f"Legacy SkillClaw skills were found at {_LEGACY_SKILLCLAW_SKILLS_DIR}; missing skills are copied into the Hermes library on startup."
+            f"Legacy SkillClaw skills were found at {_LEGACY_SKILLCLAW_SKILLS_DIR};"
+            " missing skills are copied into the Hermes library on startup."
         )
     if not backup_path:
-        next_steps.append("Run SkillClaw once before relying on `skillclaw restore hermes`, so a backup can be created.")
+        next_steps.append(
+            "Run SkillClaw once before relying on `skillclaw restore hermes`, so a backup can be created."
+        )
 
     return {
         "status": "ok" if not issues else "warning",
@@ -590,6 +597,7 @@ def _copy_missing_skill_dirs(src_root: Path, dst_root: Path) -> int:
 # ------------------------------------------------------------------ #
 # Codex adapter                                                       #
 # ------------------------------------------------------------------ #
+
 
 def _backup_codex_config_if_changed(config_path: Path, new_text: str) -> Path | None:
     return _backup_text_file_if_changed(
@@ -684,7 +692,8 @@ def inspect_codex_config(cfg: "SkillClawConfig") -> dict[str, object]:
     issues: list[str] = []
     notes: list[str] = [
         "Codex uses the OpenAI Responses-compatible SkillClaw endpoint via `model_providers.skillclaw`.",
-        "Codex session boundaries fall back to proxy-side heuristics because Codex does not send SkillClaw session headers.",
+        "Codex session boundaries fall back to proxy-side heuristics because"
+        " Codex does not send SkillClaw session headers.",
     ]
     next_steps: list[str] = []
 
@@ -745,6 +754,7 @@ def restore_codex_config(backup_path: Path | None = None) -> dict[str, str]:
 # Claude Code adapter                                                 #
 # ------------------------------------------------------------------ #
 
+
 def _backup_claude_settings_if_changed(settings_path: Path, new_text: str) -> Path | None:
     return _backup_text_file_if_changed(
         settings_path,
@@ -795,17 +805,16 @@ def inspect_claude_config(cfg: "SkillClawConfig") -> dict[str, object]:
     configured_base_url = str(env.get("ANTHROPIC_BASE_URL", "") or "")
     configured_token = str(env.get("ANTHROPIC_AUTH_TOKEN", "") or "")
     configured_model = str(data.get("model", "") or "")
-    proxy_match = (
-        configured_base_url == expected_base_url
-        and configured_token == expected_api_key
-    )
+    proxy_match = configured_base_url == expected_base_url and configured_token == expected_api_key
 
     backup_path = _latest_claude_backup_path()
     skills_dir_match = configured_skillclaw_skills_dir == expected_skills_dir
     issues: list[str] = []
     notes: list[str] = [
-        "Claude Code uses SkillClaw through `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` in ~/.claude/settings.json.",
-        "Claude Code session boundaries fall back to proxy-side heuristics because Claude Code does not send SkillClaw session headers.",
+        "Claude Code uses SkillClaw through `ANTHROPIC_BASE_URL` and"
+        " `ANTHROPIC_AUTH_TOKEN` in ~/.claude/settings.json.",
+        "Claude Code session boundaries fall back to proxy-side heuristics"
+        " because Claude Code does not send SkillClaw session headers.",
     ]
     next_steps: list[str] = []
 
@@ -824,7 +833,9 @@ def inspect_claude_config(cfg: "SkillClawConfig") -> dict[str, object]:
         )
         next_steps.append(f"Set `skills.dir` to {expected_skills_dir} when using the Claude Code integration.")
     if not backup_path:
-        next_steps.append("Run SkillClaw once before relying on `skillclaw restore claude`, so a backup can be created.")
+        next_steps.append(
+            "Run SkillClaw once before relying on `skillclaw restore claude`, so a backup can be created."
+        )
 
     return {
         "status": "ok" if not issues else "warning",
@@ -864,6 +875,7 @@ def restore_claude_config(backup_path: Path | None = None) -> dict[str, str]:
 # QwenPaw adapter                                                     #
 # ------------------------------------------------------------------ #
 
+
 def _get_qwenpaw_env(key: str, default: str = "") -> str:
     """Look up a QwenPaw env var."""
     if key in os.environ:
@@ -873,12 +885,20 @@ def _get_qwenpaw_env(key: str, default: str = "") -> str:
 
 def _resolve_qwenpaw_dirs() -> tuple[Path, Path]:
     """Resolve QwenPaw working/secret directories."""
-    working_dir = Path(
-        _get_qwenpaw_env("QWENPAW_WORKING_DIR", "~/.qwenpaw"),
-    ).expanduser().resolve()
-    secret_dir = Path(
-        _get_qwenpaw_env("QWENPAW_SECRET_DIR", f"{working_dir}.secret"),
-    ).expanduser().resolve()
+    working_dir = (
+        Path(
+            _get_qwenpaw_env("QWENPAW_WORKING_DIR", "~/.qwenpaw"),
+        )
+        .expanduser()
+        .resolve()
+    )
+    secret_dir = (
+        Path(
+            _get_qwenpaw_env("QWENPAW_SECRET_DIR", f"{working_dir}.secret"),
+        )
+        .expanduser()
+        .resolve()
+    )
     return working_dir, secret_dir
 
 
@@ -947,16 +967,10 @@ def _configure_qwenpaw(cfg: "SkillClawConfig") -> None:
         provider_data.get("support_connection_check", True),
     )
     provider_data["generate_kwargs"] = (
-        provider_data["generate_kwargs"]
-        if isinstance(provider_data.get("generate_kwargs"), dict)
-        else {}
+        provider_data["generate_kwargs"] if isinstance(provider_data.get("generate_kwargs"), dict) else {}
     )
-    provider_data["meta"] = (
-        provider_data["meta"] if isinstance(provider_data.get("meta"), dict) else {}
-    )
-    provider_data["models"] = (
-        provider_data["models"] if isinstance(provider_data.get("models"), list) else []
-    )
+    provider_data["meta"] = provider_data["meta"] if isinstance(provider_data.get("meta"), dict) else {}
+    provider_data["models"] = provider_data["models"] if isinstance(provider_data.get("models"), list) else []
     provider_data["extra_models"] = _upsert_model_info(
         provider_data.get("extra_models"),
         model_id,
@@ -973,6 +987,7 @@ def _configure_qwenpaw(cfg: "SkillClawConfig") -> None:
 # ------------------------------------------------------------------ #
 # IronClaw adapter                                                    #
 # ------------------------------------------------------------------ #
+
 
 def _configure_ironclaw(cfg: "SkillClawConfig") -> None:
     """Auto-configure IronClaw to use the SkillClaw proxy.
@@ -1042,6 +1057,7 @@ def _patch_dotenv(env_path: Path, new_vars: dict[str, str], label: str = "IronCl
 # PicoClaw adapter                                                     #
 # ------------------------------------------------------------------ #
 
+
 def _configure_picoclaw(cfg: "SkillClawConfig") -> None:
     """Auto-configure PicoClaw to use the SkillClaw proxy.
 
@@ -1104,6 +1120,7 @@ def _configure_picoclaw(cfg: "SkillClawConfig") -> None:
 # ------------------------------------------------------------------ #
 # ZeroClaw adapter                                                     #
 # ------------------------------------------------------------------ #
+
 
 def _configure_zeroclaw(cfg: "SkillClawConfig") -> None:
     """Auto-configure ZeroClaw to use the SkillClaw proxy.
@@ -1177,6 +1194,7 @@ def _patch_toml(toml_path: Path, new_vars: dict[str, str]) -> None:
 # NanoClaw adapter                                                    #
 # ------------------------------------------------------------------ #
 
+
 def _configure_nanoclaw(cfg: "SkillClawConfig") -> None:
     """Auto-configure NanoClaw to route API calls through SkillClaw proxy.
 
@@ -1210,6 +1228,7 @@ def _configure_nanoclaw(cfg: "SkillClawConfig") -> None:
     # Restart nanoclaw via launchd (macOS) or systemd --user (Linux)
     if platform.system() == "Darwin":
         import os
+
         uid = os.getuid()
         _run_commands(
             "nanoclaw",
@@ -1233,6 +1252,7 @@ def _find_nanoclaw_env() -> Path | None:
     if plist_path.exists():
         try:
             import plistlib
+
             with open(plist_path, "rb") as f:
                 plist = plistlib.load(f)
             work_dir = plist.get("WorkingDirectory")
@@ -1273,6 +1293,7 @@ def _find_nanoclaw_env() -> Path | None:
 # NemoClaw adapter                                                    #
 # ------------------------------------------------------------------ #
 
+
 def _configure_nemoclaw(cfg: "SkillClawConfig") -> None:
     """Auto-configure NemoClaw to route inference through SkillClaw proxy.
 
@@ -1288,25 +1309,44 @@ def _configure_nemoclaw(cfg: "SkillClawConfig") -> None:
 
     # Step 1: Register (or update) the skillclaw provider in OpenShell
     create_cmd = [
-        "openshell", "provider", "create",
-        "--name", "skillclaw",
-        "--type", "openai",
-        "--credential", f"OPENAI_API_KEY={api_key}",
-        "--config", f"OPENAI_BASE_URL={base_url}",
+        "openshell",
+        "provider",
+        "create",
+        "--name",
+        "skillclaw",
+        "--type",
+        "openai",
+        "--credential",
+        f"OPENAI_API_KEY={api_key}",
+        "--config",
+        f"OPENAI_BASE_URL={base_url}",
     ]
     try:
         result = subprocess.run(
-            create_cmd, capture_output=True, text=True, timeout=15,
+            create_cmd,
+            capture_output=True,
+            text=True,
+            timeout=15,
         )
         if result.returncode != 0:
             stderr = result.stderr or ""
             if "AlreadyExists" in stderr or "already exists" in stderr.lower():
                 logger.info("[ClawAdapter] openshell provider 'skillclaw' exists — updating")
-                _run_commands("nemoclaw", [[
-                    "openshell", "provider", "update", "skillclaw",
-                    "--credential", f"OPENAI_API_KEY={api_key}",
-                    "--config", f"OPENAI_BASE_URL={base_url}",
-                ]])
+                _run_commands(
+                    "nemoclaw",
+                    [
+                        [
+                            "openshell",
+                            "provider",
+                            "update",
+                            "skillclaw",
+                            "--credential",
+                            f"OPENAI_API_KEY={api_key}",
+                            "--config",
+                            f"OPENAI_BASE_URL={base_url}",
+                        ]
+                    ],
+                )
             else:
                 logger.warning(
                     "[ClawAdapter] openshell provider create failed: %s",
@@ -1316,20 +1356,27 @@ def _configure_nemoclaw(cfg: "SkillClawConfig") -> None:
         else:
             logger.info("[ClawAdapter] openshell provider create skillclaw → ok")
     except FileNotFoundError:
-        logger.warning(
-            "[ClawAdapter] 'openshell' not found in PATH — configure NemoClaw manually."
-        )
+        logger.warning("[ClawAdapter] 'openshell' not found in PATH — configure NemoClaw manually.")
         return
     except Exception as e:
         logger.warning("[ClawAdapter] openshell provider create error: %s", e)
         return
 
     # Step 2: Set inference route to the skillclaw provider
-    _run_commands("nemoclaw", [[
-        "openshell", "inference", "set",
-        "--provider", "skillclaw",
-        "--model", model_id,
-    ]])
+    _run_commands(
+        "nemoclaw",
+        [
+            [
+                "openshell",
+                "inference",
+                "set",
+                "--provider",
+                "skillclaw",
+                "--model",
+                model_id,
+            ]
+        ],
+    )
 
     # Step 3: Persist ~/.nemoclaw/config.json
     _write_nemoclaw_config(base_url, model_id, api_key)
@@ -1365,6 +1412,7 @@ def _write_nemoclaw_config(endpoint_url: str, model: str, api_key: str) -> None:
 # Noop adapter                                                        #
 # ------------------------------------------------------------------ #
 
+
 def _configure_none(cfg: "SkillClawConfig") -> None:
     logger.info("[ClawAdapter] claw_type=none — skipping auto-configuration")
 
@@ -1394,6 +1442,7 @@ CLAW_TYPES: list[str] = list(_ADAPTERS)
 # ------------------------------------------------------------------ #
 # Shared helper                                                       #
 # ------------------------------------------------------------------ #
+
 
 def _run_commands(
     agent_name: str,
@@ -1425,8 +1474,7 @@ def _run_commands(
                 )
             else:
                 logger.warning(
-                    "[ClawAdapter] '%s' not found in PATH — skipping auto-config. "
-                    "Configure %s manually.",
+                    "[ClawAdapter] '%s' not found in PATH — skipping auto-config. Configure %s manually.",
                     cmd[0],
                     agent_name,
                 )

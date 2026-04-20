@@ -28,7 +28,7 @@ Usage::
 """
 
 from .core.config import EvolveServerConfig
-from .core.constants import DecisionAction, FailureType, FAILURE_LABELS, NO_SKILL_KEY
+from .core.constants import FAILURE_LABELS, NO_SKILL_KEY, DecisionAction, FailureType
 from .core.llm_client import AsyncLLMClient
 from .core.skill_registry import SkillIDRegistry
 from .engines.agent import AgentEvolveServer

@@ -15,12 +15,12 @@ Usage:
 
 from __future__ import annotations
 
+import glob
 import hashlib
 import json
 import logging
 import os
 import shutil
-import glob
 from datetime import datetime, timezone
 from typing import Any, Collection, Optional
 
@@ -38,9 +38,7 @@ def _compute_sha256(path: str) -> str:
 
 
 def _is_hermes_skill_root(skills_dir: str) -> bool:
-    return os.path.realpath(skills_dir) == os.path.realpath(
-        os.path.join(os.path.expanduser("~"), ".hermes", "skills")
-    )
+    return os.path.realpath(skills_dir) == os.path.realpath(os.path.join(os.path.expanduser("~"), ".hermes", "skills"))
 
 
 def _skill_dir_for_root(skills_dir: str, skill_name: str, category: str = "general") -> str:
@@ -215,7 +213,10 @@ class SkillHub:
                 if inj >= min_inj and eff < min_eff:
                     logger.info(
                         "[SkillHub] filtered out skill %s (effectiveness=%.2f < %.2f, injections=%d)",
-                        skill_name, eff, min_eff, inj,
+                        skill_name,
+                        eff,
+                        min_eff,
+                        inj,
                     )
                     filtered += 1
                     continue
@@ -246,7 +247,10 @@ class SkillHub:
 
         logger.info(
             "[SkillHub] push complete: %d uploaded, %d skipped, %d filtered, %d total",
-            uploaded, skipped, filtered, len(paths),
+            uploaded,
+            skipped,
+            filtered,
+            len(paths),
         )
         return {"uploaded": uploaded, "skipped": skipped, "filtered": filtered, "total_local": len(paths)}
 
@@ -267,6 +271,7 @@ class SkillHub:
 
         try:
             import yaml
+
             fm = yaml.safe_load(raw[3:end_idx].strip()) or {}
         except Exception:
             fm = {}
@@ -331,10 +336,7 @@ class SkillHub:
             return target
 
         if str(category or "general").strip() == "general":
-            nested = [
-                path for path in existing_dirs
-                if len(os.path.relpath(path, skills_dir).split(os.sep)) >= 2
-            ]
+            nested = [path for path in existing_dirs if len(os.path.relpath(path, skills_dir).split(os.sep)) >= 2]
             if len(nested) == 1:
                 return nested[0]
 
@@ -364,10 +366,7 @@ class SkillHub:
     def _prune_backups(backup_root: str, prefix: str, keep: int = 3) -> None:
         """Keep only newest `keep` backups for current skills dir."""
         try:
-            names = sorted(
-                n for n in os.listdir(backup_root)
-                if n.startswith(prefix)
-            )
+            names = sorted(n for n in os.listdir(backup_root) if n.startswith(prefix))
         except Exception:
             return
         to_delete = names[:-keep] if keep > 0 else names
@@ -412,17 +411,10 @@ class SkillHub:
         local_dirs_by_name = self._list_local_skill_dirs(skills_dir)
         local_skills = {name: dirs[-1] for name, dirs in local_dirs_by_name.items() if dirs}
         manifest = self._load_remote_manifest()
-        skip_set = {
-            str(name or "").strip()
-            for name in (skip_names or [])
-            if str(name or "").strip()
-        }
+        skip_set = {str(name or "").strip() for name in (skip_names or []) if str(name or "").strip()}
         if not manifest:
             # Empty/failed manifest is treated as no-op to avoid accidental wipe.
-            logger.warning(
-                "[SkillHub] remote manifest empty; skip mirror pull "
-                "(downloaded=0 skipped=0 deleted=0)"
-            )
+            logger.warning("[SkillHub] remote manifest empty; skip mirror pull (downloaded=0 skipped=0 deleted=0)")
             return {
                 "downloaded": 0,
                 "skipped": 0,
@@ -478,7 +470,9 @@ class SkillHub:
 
             logger.info(
                 "[SkillHub] incremental pull complete: %d downloaded, %d skipped, %d total remote",
-                downloaded, skipped, len(manifest),
+                downloaded,
+                skipped,
+                len(manifest),
             )
             return {
                 "downloaded": downloaded,
@@ -610,7 +604,10 @@ class SkillHub:
 
         logger.info(
             "[SkillHub] pull complete: %d downloaded, %d skipped, %d deleted, %d total remote",
-            downloaded, skipped, deleted, len(manifest),
+            downloaded,
+            skipped,
+            deleted,
+            len(manifest),
         )
         self._prune_backups(backup_root, backup_prefix, keep=3)
         return {

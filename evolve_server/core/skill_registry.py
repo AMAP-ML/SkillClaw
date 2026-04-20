@@ -121,12 +121,14 @@ class SkillIDRegistry:
         entry["version"] = new_version
         entry["content_sha"] = content_sha
         history: list = entry.setdefault("history", [])
-        history.append({
-            "version": new_version,
-            "content_sha": content_sha,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "action": action,
-        })
+        history.append(
+            {
+                "version": new_version,
+                "content_sha": content_sha,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "action": action,
+            }
+        )
         if len(history) > 20:
             entry["history"] = history[-20:]
 

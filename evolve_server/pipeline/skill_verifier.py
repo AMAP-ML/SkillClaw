@@ -222,12 +222,7 @@ async def verify_skill_candidate(
     checks = _normalize_checks(parsed.get("checks"))
     score = _compute_score(parsed.get("score"), checks)
     decision_raw = str(parsed.get("decision", "") or "").strip().lower()
-    reason = str(
-        parsed.get("reason")
-        or parsed.get("rationale")
-        or parsed.get("notes")
-        or ""
-    ).strip()
+    reason = str(parsed.get("reason") or parsed.get("rationale") or parsed.get("notes") or "").strip()
 
     accepted = decision_raw == "accept"
     if score is not None and score < float(min_score):

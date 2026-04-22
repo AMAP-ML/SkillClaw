@@ -351,8 +351,28 @@ class DashboardFixture:
                 "version": 3,
                 "content_sha": _sha256_text(self.shared_docs["debug-notes"]),
                 "history": [
-                    _history_entry(1, _skill_doc("debug-notes", "Keep a compact running log while debugging.", "Capture the failing assumption before editing any file.", category="coding"), "2026-04-18T08:00:00Z", "create"),
-                    _history_entry(2, _skill_doc("debug-notes", "Keep a compact running log while debugging.", "Capture the failing assumption and note what changed after each retry.", category="coding"), "2026-04-19T08:15:00Z", "improve"),
+                    _history_entry(
+                        1,
+                        _skill_doc(
+                            "debug-notes",
+                            "Keep a compact running log while debugging.",
+                            "Capture the failing assumption before editing any file.",
+                            category="coding",
+                        ),
+                        "2026-04-18T08:00:00Z",
+                        "create",
+                    ),
+                    _history_entry(
+                        2,
+                        _skill_doc(
+                            "debug-notes",
+                            "Keep a compact running log while debugging.",
+                            "Capture the failing assumption and note what changed after each retry.",
+                            category="coding",
+                        ),
+                        "2026-04-19T08:15:00Z",
+                        "improve",
+                    ),
                     _history_entry(3, self.shared_docs["debug-notes"], "2026-04-20T09:30:00Z", "improve"),
                 ],
             },
@@ -361,7 +381,17 @@ class DashboardFixture:
                 "version": 2,
                 "content_sha": _sha256_text(self.shared_docs["incident-timeline"]),
                 "history": [
-                    _history_entry(1, _skill_doc("incident-timeline", "Summarize incident progression, impact window, and mitigation sequence.", "Track first impact, mitigation, and restore time.", category="ops"), "2026-04-19T12:00:00Z", "create"),
+                    _history_entry(
+                        1,
+                        _skill_doc(
+                            "incident-timeline",
+                            "Summarize incident progression, impact window, and mitigation sequence.",
+                            "Track first impact, mitigation, and restore time.",
+                            category="ops",
+                        ),
+                        "2026-04-19T12:00:00Z",
+                        "create",
+                    ),
                     _history_entry(2, self.shared_docs["incident-timeline"], "2026-04-20T16:25:00Z", "improve"),
                 ],
             },
@@ -370,7 +400,17 @@ class DashboardFixture:
                 "version": 2,
                 "content_sha": _sha256_text(self.shared_docs["release-rollback-runbook"]),
                 "history": [
-                    _history_entry(1, _skill_doc("release-rollback-runbook", "Coordinate rollback checks during incident mitigation.", "Confirm rollback owner and migration compatibility.", category="ops"), "2026-04-19T19:30:00Z", "create"),
+                    _history_entry(
+                        1,
+                        _skill_doc(
+                            "release-rollback-runbook",
+                            "Coordinate rollback checks during incident mitigation.",
+                            "Confirm rollback owner and migration compatibility.",
+                            category="ops",
+                        ),
+                        "2026-04-19T19:30:00Z",
+                        "create",
+                    ),
                     _history_entry(2, self.shared_docs["release-rollback-runbook"], "2026-04-20T17:20:00Z", "improve"),
                 ],
             },
@@ -379,7 +419,17 @@ class DashboardFixture:
                 "version": 2,
                 "content_sha": _sha256_text(self.shared_docs["sql-trace"]),
                 "history": [
-                    _history_entry(1, _skill_doc("sql-trace", "Trace SQL state transitions during debugging.", "Log query text, parameters, and row counts.", category="data_analysis"), "2026-04-19T07:50:00Z", "create"),
+                    _history_entry(
+                        1,
+                        _skill_doc(
+                            "sql-trace",
+                            "Trace SQL state transitions during debugging.",
+                            "Log query text, parameters, and row counts.",
+                            category="data_analysis",
+                        ),
+                        "2026-04-19T07:50:00Z",
+                        "create",
+                    ),
                     _history_entry(2, self.shared_docs["sql-trace"], "2026-04-20T09:40:00Z", "improve"),
                 ],
             },
@@ -388,9 +438,39 @@ class DashboardFixture:
                 "version": 4,
                 "content_sha": _sha256_text(self.shared_docs["prompt-risk-screener"]),
                 "history": [
-                    _history_entry(1, _skill_doc("prompt-risk-screener", "Screen prompts for policy, jailbreak, and ambiguity risks before execution.", "Classify unsafe requests before suggesting changes.", category="governance"), "2026-04-18T06:15:00Z", "create"),
-                    _history_entry(2, _skill_doc("prompt-risk-screener", "Screen prompts for policy, jailbreak, and ambiguity risks before execution.", "Separate policy risk from simple ambiguity.", category="governance"), "2026-04-19T10:45:00Z", "improve"),
-                    _history_entry(3, _skill_doc("prompt-risk-screener", "Screen prompts for policy, jailbreak, and ambiguity risks before execution.", "Add a small safe-rewrite suggestion when blocking is not needed.", category="governance"), "2026-04-20T08:10:00Z", "improve"),
+                    _history_entry(
+                        1,
+                        _skill_doc(
+                            "prompt-risk-screener",
+                            "Screen prompts for policy, jailbreak, and ambiguity risks before execution.",
+                            "Classify unsafe requests before suggesting changes.",
+                            category="governance",
+                        ),
+                        "2026-04-18T06:15:00Z",
+                        "create",
+                    ),
+                    _history_entry(
+                        2,
+                        _skill_doc(
+                            "prompt-risk-screener",
+                            "Screen prompts for policy, jailbreak, and ambiguity risks before execution.",
+                            "Separate policy risk from simple ambiguity.",
+                            category="governance",
+                        ),
+                        "2026-04-19T10:45:00Z",
+                        "improve",
+                    ),
+                    _history_entry(
+                        3,
+                        _skill_doc(
+                            "prompt-risk-screener",
+                            "Screen prompts for policy, jailbreak, and ambiguity risks before execution.",
+                            "Add a small safe-rewrite suggestion when blocking is not needed.",
+                            category="governance",
+                        ),
+                        "2026-04-20T08:10:00Z",
+                        "improve",
+                    ),
                     _history_entry(4, self.shared_docs["prompt-risk-screener"], "2026-04-20T20:10:00Z", "improve"),
                 ],
             },
@@ -433,7 +513,10 @@ class DashboardFixture:
                     {
                         "turn_num": 2,
                         "prompt_text": "Patch the auth fixture and re-run the failing contract test.",
-                        "response_text": "Header casing was wrong in the fixture; I updated the checklist and reran the contract path.",
+                        "response_text": (
+                            "Header casing was wrong in the fixture; "
+                            "I updated the checklist and reran the contract path."
+                        ),
                         "injected_skills": [],
                         "read_skills": [{"skill_name": "api-contract-checklist"}],
                         "modified_skills": [{"skill_name": "api-contract-checklist"}],
@@ -464,7 +547,9 @@ class DashboardFixture:
                 "turns": [
                     {
                         "turn_num": 1,
-                        "prompt_text": "Screen a customer prompt that mixes benign analytics with policy-sensitive content.",
+                        "prompt_text": (
+                            "Screen a customer prompt that mixes benign analytics with policy-sensitive content."
+                        ),
                         "response_text": "I will separate ambiguity from policy-sensitive intent first.",
                         "injected_skills": ["prompt-risk-screener"],
                         "read_skills": [],
@@ -505,7 +590,9 @@ class DashboardFixture:
                     {
                         "turn_num": 2,
                         "prompt_text": "Patch the query logging and retry.",
-                        "response_text": "Added query logging, confirmed the transaction scope, and updated the trace skill.",
+                        "response_text": (
+                            "Added query logging, confirmed the transaction scope, and updated the trace skill."
+                        ),
                         "injected_skills": ["debug-notes"],
                         "read_skills": [{"skill_name": "sql-trace"}],
                         "modified_skills": [{"skill_name": "sql-trace"}],
@@ -537,7 +624,9 @@ class DashboardFixture:
                     {
                         "turn_num": 2,
                         "prompt_text": "Prepare a rollback note for the release manager.",
-                        "response_text": "Captured the rollback sequence and annotated the timeline with mitigation checkpoints.",
+                        "response_text": (
+                            "Captured the rollback sequence and annotated the timeline with mitigation checkpoints."
+                        ),
                         "injected_skills": ["release-rollback-runbook"],
                         "read_skills": [],
                         "modified_skills": [{"skill_name": "incident-timeline"}],
@@ -638,7 +727,9 @@ class DashboardFixture:
                 "session_evidence": [
                     {
                         "session_id": "sess-103",
-                        "summary": "Reviewer flagged false positives when ambiguous prompts were screened too aggressively.",
+                        "summary": (
+                            "Reviewer flagged false positives when ambiguous prompts were screened too aggressively."
+                        ),
                         "judge_overall_score": 0.71,
                         "avg_prm": 0.735,
                     }
@@ -659,7 +750,10 @@ class DashboardFixture:
                 "min_approvals": 1,
                 "min_score": 0.7,
                 "max_rejections": 1,
-                "rationale": "The current skill blocks too early on ambiguous prompts. A reviewer should confirm the safer rewrite path.",
+                "rationale": (
+                    "The current skill blocks too early on ambiguous prompts. "
+                    "A reviewer should confirm the safer rewrite path."
+                ),
             },
             {
                 "job_id": "job-review",
@@ -691,7 +785,9 @@ class DashboardFixture:
                 "min_approvals": 2,
                 "min_score": 0.75,
                 "max_rejections": 0,
-                "rationale": "The checklist looks reusable, but reviewers disagree on whether it is still too API-specific.",
+                "rationale": (
+                    "The checklist looks reusable, but reviewers disagree on whether it is still too API-specific."
+                ),
             },
             {
                 "job_id": "job-rejected",
@@ -708,7 +804,9 @@ class DashboardFixture:
                     },
                     {
                         "session_id": "sess-101",
-                        "summary": "Shared incident replay showed the shortcut skipped validation steps needed by oncall.",
+                        "summary": (
+                            "Shared incident replay showed the shortcut skipped validation steps needed by oncall."
+                        ),
                         "judge_overall_score": 0.35,
                         "avg_prm": 0.715,
                     },
@@ -767,7 +865,9 @@ class DashboardFixture:
                 "min_approvals": 2,
                 "min_score": 0.75,
                 "max_rejections": 0,
-                "rationale": "The new trace format consistently improved debugging quality across two SQL persistence failures.",
+                "rationale": (
+                    "The new trace format consistently improved debugging quality across two SQL persistence failures."
+                ),
             },
         ]
         for payload in validation_jobs:
@@ -897,11 +997,15 @@ class DashboardFixture:
                 "turns": [
                     (
                         "Investigate why the partner API test still returns 401 after the fixture refactor.",
-                        "I will validate the auth contract, capture the current request shape, and keep a short debug log before editing code.",
+                        "I will validate the auth contract, capture the current "
+                        "request shape, and keep a short debug log before editing "
+                        "code.",
                     ),
                     (
                         "Patch the fixture and summarize the exact verification steps.",
-                        "The header casing was wrong in the fixture. I updated the contract checklist, reran the failing test, and recorded the verification path.",
+                        "The header casing was wrong in the fixture. I updated the "
+                        "contract checklist, reran the failing test, and recorded "
+                        "the verification path.",
                     ),
                 ],
             },
@@ -922,7 +1026,8 @@ class DashboardFixture:
                     ),
                     (
                         "Summarize what remains risky after the rollback.",
-                        "The rollback stabilized traffic, but secondary validation is still required for delayed jobs and dashboard lag.",
+                        "The rollback stabilized traffic, but secondary validation "
+                        "is still required for delayed jobs and dashboard lag.",
                     ),
                 ],
             },
@@ -939,11 +1044,13 @@ class DashboardFixture:
                 "turns": [
                     (
                         "Debug why the retry worker stops after one transient failure.",
-                        "I will keep a compact note of each assumption and check whether the worker state changes between retries.",
+                        "I will keep a compact note of each assumption and check "
+                        "whether the worker state changes between retries.",
                     ),
                     (
                         "Summarize what is still unknown.",
-                        "We know the retry lease expires too early, but we still need one more probe around worker heartbeats.",
+                        "We know the retry lease expires too early, but we still "
+                        "need one more probe around worker heartbeats.",
                     ),
                 ],
             },
@@ -1018,8 +1125,15 @@ class DashboardFixture:
                     },
                 ],
                 "instruction_text": "Summarize the retry-worker regression and keep the answer brief.",
-                "prompt_text": "system: Skill catalog injected\n\nuser: Summarize the retry-worker regression and keep the answer brief.",
-                "response_text": "The worker exits after the first transient failure because the lease heartbeat stops renewing after the retry path resets its state.",
+                "prompt_text": (
+                    "system: Skill catalog injected\n\nuser: Summarize the "
+                    "retry-worker regression and keep the answer brief."
+                ),
+                "response_text": (
+                    "The worker exits after the first transient failure because "
+                    "the lease heartbeat stops renewing after the retry path "
+                    "resets its state."
+                ),
                 "tool_calls": [],
             },
             {
@@ -1035,7 +1149,11 @@ class DashboardFixture:
                 ],
                 "instruction_text": "Now list the next two verification steps.",
                 "prompt_text": "system: Skill catalog injected\n\nuser: Now list the next two verification steps.",
-                "response_text": "1. Capture lease-heartbeat timestamps across the retry boundary.\n2. Verify whether the worker resets its retry state before the heartbeat loop restarts.",
+                "response_text": (
+                    "1. Capture lease-heartbeat timestamps across the retry "
+                    "boundary.\n2. Verify whether the worker resets its retry "
+                    "state before the heartbeat loop restarts."
+                ),
                 "tool_calls": [],
             },
         ]
@@ -1164,12 +1282,7 @@ class DashboardSnapshotTests(unittest.TestCase):
         service = DashboardService(self.fixture.config)
         result = service.export_local_sessions()
         self.assertEqual(result["result"]["exported"], 5)
-        exported_path = (
-            self.fixture.share_root
-            / "team-alpha"
-            / "sessions"
-            / "local-001.json"
-        )
+        exported_path = self.fixture.share_root / "team-alpha" / "sessions" / "local-001.json"
         self.assertTrue(exported_path.exists())
         exported_payload = json.loads(exported_path.read_text(encoding="utf-8"))
         self.assertEqual(exported_payload["session_id"], "local-001")
@@ -1184,12 +1297,7 @@ class DashboardSnapshotTests(unittest.TestCase):
         self.assertEqual(result["result"]["missing"], 1)
         self.assertEqual(result["result"]["missing_ids"], ["missing-002"])
         self.assertEqual(result["result"]["exported"], 1)
-        exported_path = (
-            self.fixture.share_root
-            / "team-alpha"
-            / "sessions"
-            / "local-001.json"
-        )
+        exported_path = self.fixture.share_root / "team-alpha" / "sessions" / "local-001.json"
         self.assertTrue(exported_path.exists())
 
 
@@ -1230,11 +1338,7 @@ class DashboardApiTests(unittest.TestCase):
             self.assertEqual(detail_resp.status_code, 200)
             debug_detail = detail_resp.json()
             self.assertEqual(debug_detail["name"], "debug-notes")
-            debug_v2 = next(
-                item
-                for item in debug_detail["versions"]
-                if int(item["version"]) == 2
-            )
+            debug_v2 = next(item for item in debug_detail["versions"] if int(item["version"]) == 2)
 
             activate_resp = client.post(
                 f"/api/v1/skills/{debug_skill['skill_id']}/activate",
@@ -1281,11 +1385,7 @@ class DashboardApiTests(unittest.TestCase):
 
             skills_after_pull = client.get("/api/v1/skills")
             self.assertEqual(skills_after_pull.status_code, 200)
-            sql_trace = next(
-                item
-                for item in skills_after_pull.json()["items"]
-                if item["name"] == "sql-trace"
-            )
+            sql_trace = next(item for item in skills_after_pull.json()["items"] if item["name"] == "sql-trace")
             self.assertEqual(sql_trace["source"], "both")
 
             review_resp = client.post(
@@ -1301,12 +1401,7 @@ class DashboardApiTests(unittest.TestCase):
             review_payload = review_resp.json()
             self.assertEqual(review_payload["user_alias"], "tester")
             self.assertEqual(review_payload["result"]["accepted"], True)
-            saved_result_path = (
-                self.fixture.group_dir
-                / "validation_results"
-                / "job-pending"
-                / "tester.json"
-            )
+            saved_result_path = self.fixture.group_dir / "validation_results" / "job-pending" / "tester.json"
             self.assertTrue(saved_result_path.exists())
             saved_result = json.loads(saved_result_path.read_text(encoding="utf-8"))
             self.assertEqual(saved_result["decision"], "accept")
@@ -1315,9 +1410,7 @@ class DashboardApiTests(unittest.TestCase):
             validation_after_review = client.get("/api/v1/validation/jobs")
             self.assertEqual(validation_after_review.status_code, 200)
             reviewed_job = next(
-                item
-                for item in validation_after_review.json()["items"]
-                if item["job_id"] == "job-pending"
+                item for item in validation_after_review.json()["items"] if item["job_id"] == "job-pending"
             )
             self.assertEqual(reviewed_job["status"], "review")
             self.assertEqual(reviewed_job["result_count"], 1)

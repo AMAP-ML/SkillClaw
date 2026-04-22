@@ -15,8 +15,8 @@ from typing import Any
 
 import yaml
 
-from evolve_server.core.utils import build_skill_md
 from evolve_server.core.skill_registry import SkillIDRegistry
+from evolve_server.core.utils import build_skill_md
 
 from .config import SkillClawConfig
 from .skill_hub import SkillHub
@@ -202,12 +202,9 @@ def _parse_skill_document(
     if not isinstance(skillclaw_meta, dict):
         skillclaw_meta = {}
 
-    category = str(
-        skillclaw_meta.get("category")
-        or fm.get("category")
-        or fallback_category
-        or "general"
-    ).strip() or "general"
+    category = (
+        str(skillclaw_meta.get("category") or fm.get("category") or fallback_category or "general").strip() or "general"
+    )
     name = str(fm.get("name") or fallback_name or "").strip()
     description = str(fm.get("description") or "").strip()
     extra_frontmatter = {k: v for k, v in fm.items() if k not in _CORE_FRONTMATTER_KEYS}
@@ -440,9 +437,7 @@ def _load_record_prm_scores(record_dir: Path, warnings: list[str]) -> dict[tuple
                 try:
                     payload = json.loads(raw_line)
                 except json.JSONDecodeError:
-                    warnings.append(
-                        f"failed to parse PRM record '{prm_scores_path}' line {line_no}"
-                    )
+                    warnings.append(f"failed to parse PRM record '{prm_scores_path}' line {line_no}")
                     continue
                 if not isinstance(payload, dict):
                     continue
@@ -486,9 +481,7 @@ def _load_record_sessions(config: SkillClawConfig, warnings: list[str]) -> list[
                 try:
                     payload = json.loads(raw_line)
                 except json.JSONDecodeError:
-                    warnings.append(
-                        f"failed to parse conversation record '{conversations_path}' line {line_counter}"
-                    )
+                    warnings.append(f"failed to parse conversation record '{conversations_path}' line {line_counter}")
                     continue
                 if not isinstance(payload, dict):
                     continue
@@ -637,16 +630,11 @@ def _merge_local_sessions(base: dict[str, Any], overlay: dict[str, Any]) -> dict
         list(overlay.get("turns") or []),
     )
     merged["turns"] = merged_turns
-    merged["timestamp"] = (
-        _latest_timestamp(
-            str(base.get("timestamp", "") or ""),
-            str(overlay.get("timestamp", "") or ""),
-        )
-        or str(overlay.get("timestamp", "") or base.get("timestamp", "") or "")
-    )
-    merged["user_alias"] = str(
-        overlay.get("user_alias", "") or base.get("user_alias", "") or "local"
-    )
+    merged["timestamp"] = _latest_timestamp(
+        str(base.get("timestamp", "") or ""),
+        str(overlay.get("timestamp", "") or ""),
+    ) or str(overlay.get("timestamp", "") or base.get("timestamp", "") or "")
+    merged["user_alias"] = str(overlay.get("user_alias", "") or base.get("user_alias", "") or "local")
     merged["num_turns"] = max(
         int(base.get("num_turns", 0) or 0),
         int(overlay.get("num_turns", 0) or 0),
@@ -670,15 +658,9 @@ def _merge_local_sessions(base: dict[str, Any], overlay: dict[str, Any]) -> dict
             if str(item or "").strip()
         }
     )
-    merged["transcript_path"] = str(
-        base.get("transcript_path", "") or overlay.get("transcript_path", "") or ""
-    )
-    merged["trajectory_path"] = str(
-        base.get("trajectory_path", "") or overlay.get("trajectory_path", "") or ""
-    )
-    merged["record_path"] = str(
-        overlay.get("record_path", "") or base.get("record_path", "") or ""
-    )
+    merged["transcript_path"] = str(base.get("transcript_path", "") or overlay.get("transcript_path", "") or "")
+    merged["trajectory_path"] = str(base.get("trajectory_path", "") or overlay.get("trajectory_path", "") or "")
+    merged["record_path"] = str(overlay.get("record_path", "") or base.get("record_path", "") or "")
     return merged
 
 
@@ -714,11 +696,7 @@ def _load_state_sessions(config: SkillClawConfig, warnings: list[str]) -> list[d
         transcript_path = _find_transcript_path(session_id, transcript_paths)
         turns = _parse_cursor_transcript_turns(transcript_path, warnings) if transcript_path else []
         active_skills = sorted(
-            {
-                str(item or "").strip()
-                for item in (trajectory.get("active_skills") or [])
-                if str(item or "").strip()
-            }
+            {str(item or "").strip() for item in (trajectory.get("active_skills") or []) if str(item or "").strip()}
         )
         if turns and active_skills:
             turns[0]["injected_skills"] = active_skills
@@ -741,11 +719,7 @@ def _load_state_sessions(config: SkillClawConfig, warnings: list[str]) -> list[d
                 }
             ]
 
-        timestamp = str(
-            trajectory.get("end_time")
-            or trajectory.get("start_time")
-            or ""
-        )
+        timestamp = str(trajectory.get("end_time") or trajectory.get("start_time") or "")
         if not timestamp and transcript_path is not None:
             try:
                 timestamp = datetime.fromtimestamp(transcript_path.stat().st_mtime, tz=timezone.utc).isoformat()
@@ -753,9 +727,7 @@ def _load_state_sessions(config: SkillClawConfig, warnings: list[str]) -> list[d
                 timestamp = ""
 
         outcome_reasons = [
-            str(item or "").strip()
-            for item in (trajectory.get("outcome_reasons") or [])
-            if str(item or "").strip()
+            str(item or "").strip() for item in (trajectory.get("outcome_reasons") or []) if str(item or "").strip()
         ]
         sessions.append(
             {
@@ -774,7 +746,13 @@ def _load_state_sessions(config: SkillClawConfig, warnings: list[str]) -> list[d
             }
         )
 
-    sessions.sort(key=lambda item: (str(item.get("timestamp", "") or ""), str(item.get("session_id", "") or "")), reverse=True)
+    sessions.sort(
+        key=lambda item: (
+            str(item.get("timestamp", "") or ""),
+            str(item.get("session_id", "") or ""),
+        ),
+        reverse=True,
+    )
     return sessions
 
 
@@ -914,11 +892,7 @@ def _load_shared_skills(
         if not isinstance(history, list):
             history = []
         enriched_history: list[dict[str, Any]] = []
-        current_sha = str(
-            registry_entry.get("content_sha")
-            or record.get("sha256")
-            or (_hash_text(raw) if raw else "")
-        )
+        current_sha = str(registry_entry.get("content_sha") or record.get("sha256") or (_hash_text(raw) if raw else ""))
         current_version = int(registry_entry.get("version", 0) or 0)
         if current_version <= 0 and current_sha:
             current_version = 1
@@ -1002,8 +976,20 @@ def _load_shared_skills(
     except Exception as exc:
         warnings.append(f"failed to list shared sessions: {exc}")
 
-    sessions.sort(key=lambda item: (str(item.get("timestamp", "") or ""), str(item.get("session_id", "") or "")), reverse=True)
-    validation_jobs.sort(key=lambda item: (str(item.get("created_at", "") or ""), str(item.get("job_id", "") or "")), reverse=True)
+    sessions.sort(
+        key=lambda item: (
+            str(item.get("timestamp", "") or ""),
+            str(item.get("session_id", "") or ""),
+        ),
+        reverse=True,
+    )
+    validation_jobs.sort(
+        key=lambda item: (
+            str(item.get("created_at", "") or ""),
+            str(item.get("job_id", "") or ""),
+        ),
+        reverse=True,
+    )
     return skills, sessions, validation_jobs, registry_entries
 
 
@@ -1013,10 +999,7 @@ def build_dashboard_snapshot(config: SkillClawConfig) -> dict[str, Any]:
     local_sessions = _load_local_sessions(config, warnings)
     shared_skills, shared_sessions, validation_jobs, registry_entries = _load_shared_skills(config, warnings)
 
-    skills_by_name: dict[str, dict[str, Any]] = {
-        name: dict(skill)
-        for name, skill in local_skills.items()
-    }
+    skills_by_name: dict[str, dict[str, Any]] = {name: dict(skill) for name, skill in local_skills.items()}
 
     for name, shared_skill in shared_skills.items():
         current = skills_by_name.get(name)
@@ -1033,30 +1016,14 @@ def build_dashboard_snapshot(config: SkillClawConfig) -> dict[str, Any]:
             str(current.get("updated_at", "") or ""),
             str(shared_skill.get("updated_at", "") or ""),
         )
-        current["local_updated_at"] = str(
-            current.get("local_updated_at", "")
-            or current.get("updated_at", "")
-            or ""
-        )
-        current["local_sha"] = str(
-            current.get("local_sha", "")
-            or current.get("current_sha", "")
-            or ""
-        )
+        current["local_updated_at"] = str(current.get("local_updated_at", "") or current.get("updated_at", "") or "")
+        current["local_sha"] = str(current.get("local_sha", "") or current.get("current_sha", "") or "")
         current["remote_updated_at"] = str(
-            shared_skill.get("remote_updated_at", "")
-            or shared_skill.get("updated_at", "")
-            or ""
+            shared_skill.get("remote_updated_at", "") or shared_skill.get("updated_at", "") or ""
         )
-        current["remote_sha"] = str(
-            shared_skill.get("remote_sha", "")
-            or shared_skill.get("current_sha", "")
-            or ""
-        )
+        current["remote_sha"] = str(shared_skill.get("remote_sha", "") or shared_skill.get("current_sha", "") or "")
         current["current_version"] = int(
-            shared_skill.get("current_version", 0)
-            or current.get("current_version", 0)
-            or 0
+            shared_skill.get("current_version", 0) or current.get("current_version", 0) or 0
         )
         current["current_sha"] = str(shared_skill.get("current_sha", "") or current.get("current_sha", ""))
         current["manifest"] = shared_skill.get("manifest") or {}
@@ -1211,7 +1178,9 @@ def build_dashboard_snapshot(config: SkillClawConfig) -> dict[str, Any]:
                 "stats": {},
                 "manifest": {},
                 "registry": registry_entry,
-                "versions": list(registry_entry.get("history") or []) if isinstance(registry_entry.get("history"), list) else [],
+                "versions": (
+                    list(registry_entry.get("history") or []) if isinstance(registry_entry.get("history"), list) else []
+                ),
             }
             skills_by_name[name] = skill
 
@@ -1223,21 +1192,14 @@ def build_dashboard_snapshot(config: SkillClawConfig) -> dict[str, Any]:
     normalized_skills: list[dict[str, Any]] = []
     for name in sorted(skills_by_name):
         skill = skills_by_name[name]
-        versions = [
-            item
-            for item in (skill.get("versions") or [])
-            if isinstance(item, dict)
-        ]
+        versions = [item for item in (skill.get("versions") or []) if isinstance(item, dict)]
         if not versions and skill.get("current_sha"):
             versions = [
                 {
                     "version": int(skill.get("current_version", 0) or 1),
                     "content_sha": str(skill.get("current_sha", "") or ""),
                     "timestamp": str(
-                        skill.get("updated_at")
-                        or skill.get("uploaded_at")
-                        or skill.get("last_injected_at")
-                        or ""
+                        skill.get("updated_at") or skill.get("uploaded_at") or skill.get("last_injected_at") or ""
                     ),
                     "action": "snapshot",
                     "skill_md": str(skill.get("remote_skill_md") or skill.get("skill_md") or ""),

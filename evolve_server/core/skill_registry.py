@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -106,6 +107,8 @@ class SkillIDRegistry:
         skill_name: str,
         content_sha: str,
         action: str = "create",
+        *,
+        bundle_record: Optional[dict[str, Any]] = None,
     ) -> int:
         """Record a content-changing update. Returns the new version number.
 
@@ -120,15 +123,28 @@ class SkillIDRegistry:
         new_version = entry.get("version", 0) + 1
         entry["version"] = new_version
         entry["content_sha"] = content_sha
+        if isinstance(bundle_record, dict):
+            for key in ("format", "entrypoint", "tree_sha256"):
+                if bundle_record.get(key):
+                    entry[key] = bundle_record[key]
+            files = bundle_record.get("files")
+            if isinstance(files, list):
+                entry["files"] = deepcopy(files)
         history: list = entry.setdefault("history", [])
-        history.append(
-            {
-                "version": new_version,
-                "content_sha": content_sha,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "action": action,
-            }
-        )
+        history_entry: dict[str, Any] = {
+            "version": new_version,
+            "content_sha": content_sha,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "action": action,
+        }
+        if isinstance(bundle_record, dict):
+            for key in ("format", "entrypoint", "tree_sha256"):
+                if bundle_record.get(key):
+                    history_entry[key] = bundle_record[key]
+            files = bundle_record.get("files")
+            if isinstance(files, list):
+                history_entry["files"] = deepcopy(files)
+        history.append(history_entry)
         if len(history) > 20:
             entry["history"] = history[-20:]
 

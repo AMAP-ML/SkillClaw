@@ -330,6 +330,7 @@ class DashboardStore:
         return {str(row["key"]): _json_loads(row["value"], row["value"]) for row in rows}
 
     def _skill_summary_from_row(self, row: sqlite3.Row) -> dict[str, Any]:
+        payload = _json_loads(row["raw_json"], {})
         return {
             "skill_id": row["skill_id"],
             "name": row["name"],
@@ -344,6 +345,11 @@ class DashboardStore:
             "updated_at": row["updated_at"],
             "current_version": row["current_version"],
             "current_sha": row["current_sha"],
+            "local_sha": str(payload.get("local_sha", "") or ""),
+            "remote_sha": str(payload.get("remote_sha", "") or ""),
+            "current_tree_sha": str(payload.get("current_tree_sha", "") or ""),
+            "local_tree_sha": str(payload.get("local_tree_sha", "") or ""),
+            "remote_tree_sha": str(payload.get("remote_tree_sha", "") or ""),
             "local_inject_count": row["local_inject_count"],
             "observed_injection_count": row["observed_injection_count"],
             "read_count": row["read_count"],

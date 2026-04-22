@@ -16,6 +16,11 @@ from pathlib import Path
 from typing import Any
 
 from skillclaw.object_store import build_object_store
+from skillclaw.skill_bundle import (
+    bundle_entrypoint_bytes,
+    bundle_file_records,
+    bundle_tree_sha256,
+)
 
 from ..core.config import EvolveServerConfig
 from ..core.constants import SLUG_RE
@@ -30,11 +35,13 @@ from ..pipeline.summarizer import (
 from ..storage.mock_bucket import LocalBucket
 from ..storage.oss_helpers import (
     delete_session_keys,
-    fetch_skill_content,
+    fetch_skill_bundle,
+    list_object_keys,
     list_session_keys,
     load_manifest,
     read_json_object,
     save_manifest,
+    save_version_bundle,
 )
 from .agent_workspace import AgentWorkspace
 from .agents_md import load_agents_md
@@ -272,39 +279,75 @@ class AgentEvolveServer:
     def _load_remote_skills(self) -> dict[str, dict[str, Any]]:
         return load_manifest(self._bucket, self._prefix)
 
-    def _fetch_all_skills(self, manifest: dict[str, dict]) -> dict[str, str]:
-        """Fetch SKILL.md content for all skills in the manifest."""
-        skills: dict[str, str] = {}
-        for name in manifest:
-            content = fetch_skill_content(self._bucket, self._prefix, name)
-            if content:
-                skills[name] = content
+    def _fetch_all_skills(self, manifest: dict[str, dict]) -> dict[str, dict[str, bytes]]:
+        """Fetch full bundle content for all skills in the manifest."""
+        skills: dict[str, dict[str, bytes]] = {}
+        for name, record in manifest.items():
+            bundle = fetch_skill_bundle(self._bucket, self._prefix, name, record)
+            if bundle:
+                skills[name] = bundle
         return skills
 
     # ================================================================= #
     #  Upload evolved skills                                             #
     # ================================================================= #
 
-    def _upload_skill(self, skill: dict, action: str = "create") -> None:
+    def _upload_skill(
+        self,
+        skill: dict,
+        bundle_files: dict[str, bytes],
+        action: str = "create",
+    ) -> None:
         name = skill.get("name", "")
         if not name:
             return
 
         skill_id = self._id_registry.get_or_create(name)
-        md_content = build_skill_md(skill)
+        if "SKILL.md" not in bundle_files:
+            bundle_files = {**bundle_files, "SKILL.md": build_skill_md(skill).encode("utf-8")}
+        md_bytes = bundle_entrypoint_bytes(bundle_files)
         object_key = f"{self._prefix}skills/{name}/SKILL.md"
 
-        self._bucket.put_object(object_key, md_content.encode("utf-8"))
+        self._bucket.put_object(object_key, md_bytes)
+        keep_bundle_keys: set[str] = set()
+        for rel_path, data in sorted(bundle_files.items()):
+            if rel_path == "SKILL.md":
+                continue
+            key = f"{self._prefix}skills/{name}/files/{rel_path}"
+            keep_bundle_keys.add(key)
+            self._bucket.put_object(key, data)
 
-        content_sha = hashlib.sha256(md_content.encode("utf-8")).hexdigest()
-        version = self._id_registry.record_update(name, content_sha, action=action)
+        for key in list_object_keys(self._bucket, f"{self._prefix}skills/{name}/files/"):
+            if key not in keep_bundle_keys:
+                self._bucket.delete_object(key)
+
+        content_sha = hashlib.sha256(md_bytes).hexdigest()
+        tree_sha = bundle_tree_sha256(bundle_files)
+        bundle_record = {
+            "format": "bundle_v1",
+            "entrypoint": "SKILL.md",
+            "tree_sha256": tree_sha,
+            "files": bundle_file_records(bundle_files),
+        }
+        version = self._id_registry.record_update(
+            name,
+            content_sha,
+            action=action,
+            bundle_record=bundle_record,
+        )
+        save_version_bundle(self._bucket, self._prefix, name, version, bundle_files)
 
         manifest = self._load_remote_skills()
         manifest[name] = {
+            **manifest.get(name, {}),
             "name": name,
             "skill_id": skill_id,
             "version": version,
             "sha256": content_sha,
+            "tree_sha256": tree_sha,
+            "format": "bundle_v1",
+            "entrypoint": "SKILL.md",
+            "files": bundle_record["files"],
             "uploaded_by": "evolve_server",
             "uploaded_at": datetime.now(timezone.utc).isoformat(),
             "description": skill.get("description", ""),
@@ -412,7 +455,12 @@ class AgentEvolveServer:
             skill["name"] = name
 
             try:
-                await self._call_storage(self._upload_skill, skill, action)
+                await self._call_storage(
+                    self._upload_skill,
+                    skill,
+                    change.get("bundle_files", {}),
+                    action,
+                )
                 skills_evolved += 1
                 evolution_records.append(
                     {

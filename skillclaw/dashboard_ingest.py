@@ -17,6 +17,8 @@ import yaml
 
 from evolve_server.core.skill_registry import SkillIDRegistry
 from evolve_server.core.utils import build_skill_md
+from evolve_server.storage.oss_helpers import fetch_version_bundle, load_version_bundle_record
+from skillclaw.skill_bundle import bundle_entrypoint_text, read_skill_bundle_with_meta
 
 from .config import SkillClawConfig
 from .skill_hub import SkillHub
@@ -81,11 +83,20 @@ def _hash_text(text: str) -> str:
     return _hash_bytes(text.encode("utf-8"))
 
 
-def _compute_file_sha(path: Path) -> str:
-    try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError:
-        return ""
+def _bundle_record(
+    *,
+    tree_sha256: str = "",
+    files: Any = None,
+    format_name: str = "bundle_v1",
+    entrypoint: str = "SKILL.md",
+) -> dict[str, Any]:
+    normalized_files = [dict(item) for item in files if isinstance(item, dict)] if isinstance(files, list) else []
+    return {
+        "format": str(format_name or "bundle_v1"),
+        "entrypoint": str(entrypoint or "SKILL.md"),
+        "tree_sha256": str(tree_sha256 or ""),
+        "files": normalized_files,
+    }
 
 
 def _truncate(text: str, limit: int = 180) -> str:
@@ -231,7 +242,11 @@ def _load_local_skills(config: SkillClawConfig, warnings: list[str]) -> dict[str
 
     skills: dict[str, dict[str, Any]] = {}
     for skill_path in sorted(skills_dir.rglob("SKILL.md")):
-        raw = _read_text(skill_path)
+        bundle_files, bundle_records, local_tree_sha = read_skill_bundle_with_meta(skill_path.parent)
+        try:
+            raw = bundle_entrypoint_text(bundle_files)
+        except Exception:
+            raw = _read_text(skill_path)
         if not raw:
             warnings.append(f"failed to read local skill file: {skill_path}")
             continue
@@ -251,7 +266,11 @@ def _load_local_skills(config: SkillClawConfig, warnings: list[str]) -> dict[str
             mtime = datetime.fromtimestamp(skill_path.stat().st_mtime, tz=timezone.utc).isoformat()
         except OSError:
             pass
-        local_sha = _compute_file_sha(skill_path)
+        local_sha = _hash_text(raw)
+        local_bundle_record = _bundle_record(
+            tree_sha256=local_tree_sha,
+            files=bundle_records,
+        )
 
         skills[name] = {
             "name": name,
@@ -275,6 +294,9 @@ def _load_local_skills(config: SkillClawConfig, warnings: list[str]) -> dict[str
             "current_sha": local_sha,
             "local_sha": local_sha,
             "remote_sha": "",
+            "current_tree_sha": local_tree_sha,
+            "local_tree_sha": local_tree_sha,
+            "remote_tree_sha": "",
             "local_inject_count": int(stat.get("inject_count", 0) or 0),
             "observed_injection_count": 0,
             "read_count": 0,
@@ -289,6 +311,8 @@ def _load_local_skills(config: SkillClawConfig, warnings: list[str]) -> dict[str
             "manifest": {},
             "registry": {},
             "versions": [],
+            "local_bundle_record": local_bundle_record,
+            "remote_bundle_record": {},
         }
 
     return skills
@@ -893,19 +917,70 @@ def _load_shared_skills(
             history = []
         enriched_history: list[dict[str, Any]] = []
         current_sha = str(registry_entry.get("content_sha") or record.get("sha256") or (_hash_text(raw) if raw else ""))
-        current_version = int(registry_entry.get("version", 0) or 0)
+        current_version = int(registry_entry.get("version", 0) or record.get("version", 0) or 0)
         if current_version <= 0 and current_sha:
             current_version = 1
+        remote_bundle_record = _bundle_record(
+            tree_sha256=str(record.get("tree_sha256") or registry_entry.get("tree_sha256") or ""),
+            files=record.get("files") or registry_entry.get("files") or [],
+            format_name=str(record.get("format") or registry_entry.get("format") or "bundle_v1"),
+            entrypoint=str(record.get("entrypoint") or registry_entry.get("entrypoint") or "SKILL.md"),
+        )
+        current_tree_sha = str(remote_bundle_record.get("tree_sha256") or current_sha)
         history_latest = ""
         for item in history:
             if isinstance(item, dict):
                 version_entry = dict(item)
+                version_num = int(version_entry.get("version", 0) or 0)
+                version_bundle_record = _bundle_record(
+                    tree_sha256=str(version_entry.get("tree_sha256", "") or ""),
+                    files=version_entry.get("files") or [],
+                    format_name=str(version_entry.get("format") or "bundle_v1"),
+                    entrypoint=str(version_entry.get("entrypoint") or "SKILL.md"),
+                )
+                if (not version_bundle_record["files"] or not version_bundle_record["tree_sha256"]) and version_num > 0:
+                    persisted_bundle_record = load_version_bundle_record(hub._bucket, hub._prefix(), name, version_num)
+                    if isinstance(persisted_bundle_record, dict):
+                        version_bundle_record = _bundle_record(
+                            tree_sha256=str(
+                                persisted_bundle_record.get("tree_sha256")
+                                or version_bundle_record.get("tree_sha256")
+                                or ""
+                            ),
+                            files=persisted_bundle_record.get("files") or version_bundle_record.get("files") or [],
+                            format_name=str(
+                                persisted_bundle_record.get("format")
+                                or version_bundle_record.get("format")
+                                or "bundle_v1"
+                            ),
+                            entrypoint=str(
+                                persisted_bundle_record.get("entrypoint")
+                                or version_bundle_record.get("entrypoint")
+                                or "SKILL.md"
+                            ),
+                        )
                 content_sha = str(version_entry.get("content_sha", "") or "")
                 snapshot_md = ""
                 if content_sha:
                     snapshot_md = candidate_docs_by_skill.get(name, {}).get(content_sha, "")
                 if not snapshot_md and content_sha and raw and content_sha == current_sha:
                     snapshot_md = raw
+                if not snapshot_md and version_num > 0 and version_bundle_record.get("files"):
+                    try:
+                        snapshot_bundle = fetch_version_bundle(
+                            hub._bucket,
+                            hub._prefix(),
+                            name,
+                            version_num,
+                            version_bundle_record,
+                        )
+                    except Exception:
+                        snapshot_bundle = {}
+                    if snapshot_bundle:
+                        try:
+                            snapshot_md = bundle_entrypoint_text(snapshot_bundle)
+                        except Exception:
+                            snapshot_md = ""
                 if snapshot_md:
                     parsed_snapshot = _parse_skill_document(
                         snapshot_md,
@@ -914,6 +989,12 @@ def _load_shared_skills(
                     )
                     version_entry["skill_md"] = snapshot_md
                     version_entry["content"] = str(parsed_snapshot.get("content") or "")
+                if version_bundle_record.get("files"):
+                    version_entry["bundle_record"] = version_bundle_record
+                    version_entry["tree_sha256"] = str(version_bundle_record.get("tree_sha256") or "")
+                    version_entry["format"] = str(version_bundle_record.get("format") or "bundle_v1")
+                    version_entry["entrypoint"] = str(version_bundle_record.get("entrypoint") or "SKILL.md")
+                    version_entry["files"] = list(version_bundle_record.get("files") or [])
                 enriched_history.append(version_entry)
                 history_latest = _latest_timestamp(history_latest, str(version_entry.get("timestamp", "") or ""))
 
@@ -945,6 +1026,9 @@ def _load_shared_skills(
             "current_sha": current_sha,
             "local_sha": "",
             "remote_sha": current_sha,
+            "current_tree_sha": current_tree_sha,
+            "local_tree_sha": "",
+            "remote_tree_sha": current_tree_sha,
             "local_inject_count": 0,
             "observed_injection_count": 0,
             "read_count": 0,
@@ -959,6 +1043,8 @@ def _load_shared_skills(
             "manifest": record,
             "registry": registry_entry,
             "versions": enriched_history,
+            "local_bundle_record": {},
+            "remote_bundle_record": remote_bundle_record,
         }
 
     sessions: list[dict[str, Any]] = []
@@ -1022,15 +1108,24 @@ def build_dashboard_snapshot(config: SkillClawConfig) -> dict[str, Any]:
             shared_skill.get("remote_updated_at", "") or shared_skill.get("updated_at", "") or ""
         )
         current["remote_sha"] = str(shared_skill.get("remote_sha", "") or shared_skill.get("current_sha", "") or "")
+        current["local_tree_sha"] = str(current.get("local_tree_sha", "") or current.get("current_tree_sha", "") or "")
+        current["remote_tree_sha"] = str(
+            shared_skill.get("remote_tree_sha", "") or shared_skill.get("current_tree_sha", "") or ""
+        )
         current["current_version"] = int(
             shared_skill.get("current_version", 0) or current.get("current_version", 0) or 0
         )
         current["current_sha"] = str(shared_skill.get("current_sha", "") or current.get("current_sha", ""))
+        current["current_tree_sha"] = str(
+            shared_skill.get("current_tree_sha", "") or current.get("current_tree_sha", "") or current["current_sha"]
+        )
         current["manifest"] = shared_skill.get("manifest") or {}
         current["registry"] = shared_skill.get("registry") or {}
         current["versions"] = list(shared_skill.get("versions") or [])
         current["remote_skill_md"] = shared_skill.get("skill_md", "")
         current["remote_content"] = shared_skill.get("content", "")
+        current["remote_bundle_record"] = shared_skill.get("remote_bundle_record") or {}
+        current["local_bundle_record"] = current.get("local_bundle_record") or {}
         if not current.get("description"):
             current["description"] = str(shared_skill.get("description", "") or "")
         if not current.get("metadata"):
@@ -1165,6 +1260,9 @@ def build_dashboard_snapshot(config: SkillClawConfig) -> dict[str, Any]:
                 "current_sha": str(registry_entry.get("content_sha", "") or ""),
                 "local_sha": "",
                 "remote_sha": str(registry_entry.get("content_sha", "") or ""),
+                "current_tree_sha": str(registry_entry.get("tree_sha256", "") or ""),
+                "local_tree_sha": "",
+                "remote_tree_sha": str(registry_entry.get("tree_sha256", "") or ""),
                 "local_inject_count": 0,
                 "observed_injection_count": 0,
                 "read_count": 0,
@@ -1180,6 +1278,13 @@ def build_dashboard_snapshot(config: SkillClawConfig) -> dict[str, Any]:
                 "registry": registry_entry,
                 "versions": (
                     list(registry_entry.get("history") or []) if isinstance(registry_entry.get("history"), list) else []
+                ),
+                "local_bundle_record": {},
+                "remote_bundle_record": _bundle_record(
+                    tree_sha256=str(registry_entry.get("tree_sha256", "") or ""),
+                    files=registry_entry.get("files") or [],
+                    format_name=str(registry_entry.get("format") or "bundle_v1"),
+                    entrypoint=str(registry_entry.get("entrypoint") or "SKILL.md"),
                 ),
             }
             skills_by_name[name] = skill
@@ -1198,12 +1303,14 @@ def build_dashboard_snapshot(config: SkillClawConfig) -> dict[str, Any]:
                 {
                     "version": int(skill.get("current_version", 0) or 1),
                     "content_sha": str(skill.get("current_sha", "") or ""),
+                    "tree_sha256": str(skill.get("current_tree_sha", "") or ""),
                     "timestamp": str(
                         skill.get("updated_at") or skill.get("uploaded_at") or skill.get("last_injected_at") or ""
                     ),
                     "action": "snapshot",
                     "skill_md": str(skill.get("remote_skill_md") or skill.get("skill_md") or ""),
                     "content": str(skill.get("remote_content") or skill.get("content") or ""),
+                    "bundle_record": skill.get("remote_bundle_record") or skill.get("local_bundle_record") or {},
                 }
             ]
         skill["versions"] = versions

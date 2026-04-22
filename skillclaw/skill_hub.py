@@ -24,17 +24,19 @@ import shutil
 from datetime import datetime, timezone
 from typing import Any, Collection, Optional
 
+from evolve_server.core.skill_registry import SkillIDRegistry
+
 from .object_store import build_object_store, is_not_found_error
+from .skill_bundle import (
+    bundle_entrypoint_bytes,
+    bundle_file_records,
+    bundle_has_only_entrypoint,
+    bundle_tree_sha256,
+    read_skill_bundle_with_meta,
+    write_skill_bundle,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def _compute_sha256(path: str) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _is_hermes_skill_root(skills_dir: str) -> bool:
@@ -121,6 +123,96 @@ class SkillHub:
     def _skill_key(self, skill_name: str) -> str:
         return f"{self._prefix()}skills/{skill_name}/SKILL.md"
 
+    def _skill_files_prefix(self, skill_name: str) -> str:
+        return f"{self._prefix()}skills/{skill_name}/files/"
+
+    def _skill_bundle_key(self, skill_name: str, rel_path: str) -> str:
+        clean = str(rel_path or "").strip().replace("\\", "/")
+        if clean == "SKILL.md":
+            return self._skill_key(skill_name)
+        return f"{self._skill_files_prefix(skill_name)}{clean}"
+
+    def _iter_remote_keys(self, prefix: str):
+        return self._bucket.iter_objects(prefix=prefix)
+
+    def _delete_remote_bundle_extras(self, skill_name: str, keep_paths: Collection[str]) -> None:
+        keep_keys = {
+            self._skill_bundle_key(skill_name, rel_path)
+            for rel_path in keep_paths
+            if rel_path != "SKILL.md"
+        }
+        for obj in self._iter_remote_keys(self._skill_files_prefix(skill_name)):
+            key = str(getattr(obj, "key", "") or "")
+            if key and key not in keep_keys:
+                self._bucket.delete_object(key)
+
+    def _download_skill_bundle(
+        self,
+        skill_name: str,
+        record: dict[str, Any],
+    ) -> dict[str, bytes]:
+        bundle: dict[str, bytes] = {}
+        file_entries = record.get("files")
+        if isinstance(file_entries, list) and file_entries:
+            for item in file_entries:
+                rel_path = str((item or {}).get("path") or "").strip().replace("\\", "/")
+                if not rel_path:
+                    continue
+                key = self._skill_bundle_key(skill_name, rel_path)
+                bundle[rel_path] = self._bucket.get_object(key).read()
+        else:
+            bundle["SKILL.md"] = self._bucket.get_object(self._skill_key(skill_name)).read()
+        return bundle
+
+    def _skill_version_prefix(self, skill_name: str, version: int) -> str:
+        return f"{self._prefix()}skills/{skill_name}/versions/v{max(1, int(version or 1))}/"
+
+    def _skill_version_bundle_key(self, skill_name: str, version: int, rel_path: str) -> str:
+        clean = str(rel_path or "").strip().replace("\\", "/")
+        if clean == "SKILL.md":
+            return f"{self._skill_version_prefix(skill_name, version)}SKILL.md"
+        return f"{self._skill_version_prefix(skill_name, version)}files/{clean}"
+
+    def _skill_version_record_key(self, skill_name: str, version: int) -> str:
+        return f"{self._skill_version_prefix(skill_name, version)}bundle.json"
+
+    def _save_version_bundle(self, skill_name: str, version: int, bundle_files: dict[str, bytes]) -> dict[str, Any]:
+        record = {
+            "format": "bundle_v1",
+            "entrypoint": "SKILL.md",
+            "tree_sha256": bundle_tree_sha256(bundle_files),
+            "files": bundle_file_records(bundle_files),
+        }
+        keep_keys: set[str] = set()
+        for rel_path, data in sorted(bundle_files.items()):
+            key = self._skill_version_bundle_key(skill_name, version, rel_path)
+            keep_keys.add(key)
+            self._bucket.put_object(key, data)
+        for obj in self._iter_remote_keys(f"{self._skill_version_prefix(skill_name, version)}files/"):
+            key = str(getattr(obj, "key", "") or "")
+            if key and key not in keep_keys:
+                self._bucket.delete_object(key)
+        self._bucket.put_object(
+            self._skill_version_record_key(skill_name, version),
+            json.dumps(record, ensure_ascii=False, indent=2).encode("utf-8"),
+        )
+        return record
+
+    @staticmethod
+    def _local_bundle_matches_record(skill_dir: str, record: dict[str, Any]) -> bool:
+        bundle, _records, tree_sha = read_skill_bundle_with_meta(skill_dir)
+        if not bundle:
+            return False
+        if record.get("format") == "bundle_v1":
+            return str(record.get("tree_sha256") or "") == tree_sha
+
+        try:
+            skill_md = bundle_entrypoint_bytes(bundle)
+        except Exception:
+            return False
+        skill_sha = hashlib.sha256(skill_md).hexdigest()
+        return bundle_has_only_entrypoint(bundle) and str(record.get("sha256") or "") == skill_sha
+
     # ------------------------------------------------------------------ #
     # Manifest operations                                                  #
     # ------------------------------------------------------------------ #
@@ -194,6 +286,8 @@ class SkillHub:
             return {"uploaded": 0, "skipped": 0, "filtered": 0, "total_local": 0}
 
         manifest = self._load_remote_manifest()
+        registry = SkillIDRegistry()
+        registry.load_from_oss(self._bucket, self._prefix())
         uploaded = 0
         skipped = 0
         filtered = 0
@@ -205,6 +299,7 @@ class SkillHub:
 
         for path in paths:
             skill_name = os.path.basename(os.path.dirname(path))
+            skill_dir = os.path.dirname(path)
 
             if use_filter and skill_name in stats:
                 entry = stats[skill_name]
@@ -221,19 +316,46 @@ class SkillHub:
                     filtered += 1
                     continue
 
-            local_sha = _compute_sha256(path)
+            bundle_files, bundle_records, tree_sha = read_skill_bundle_with_meta(skill_dir)
+            skill_md = bundle_entrypoint_bytes(bundle_files)
+            local_sha = hashlib.sha256(skill_md).hexdigest()
 
             remote_rec = manifest.get(skill_name)
-            if remote_rec and remote_rec.get("sha256") == local_sha:
+            if remote_rec and self._local_bundle_matches_record(skill_dir, remote_rec):
                 skipped += 1
                 continue
 
-            with open(path, "rb") as f:
-                self._bucket.put_object(self._skill_key(skill_name), f)
+            self._bucket.put_object(self._skill_key(skill_name), skill_md)
+            for rel_path, data in sorted(bundle_files.items()):
+                if rel_path == "SKILL.md":
+                    continue
+                self._bucket.put_object(self._skill_bundle_key(skill_name, rel_path), data)
+            self._delete_remote_bundle_extras(skill_name, bundle_files.keys())
+
+            bundle_record = {
+                "format": "bundle_v1",
+                "entrypoint": "SKILL.md",
+                "tree_sha256": tree_sha,
+                "files": bundle_records,
+            }
+            version = registry.record_update(
+                skill_name,
+                local_sha,
+                action="push",
+                bundle_record=bundle_record,
+            )
+            self._save_version_bundle(skill_name, version, bundle_files)
 
             manifest[skill_name] = {
+                **(remote_rec or {}),
                 "name": skill_name,
+                "skill_id": registry.get_or_create(skill_name),
+                "version": version,
                 "sha256": local_sha,
+                "tree_sha256": tree_sha,
+                "format": "bundle_v1",
+                "entrypoint": "SKILL.md",
+                "files": bundle_records,
                 "uploaded_by": self._user_alias,
                 "uploaded_at": datetime.now(timezone.utc).isoformat(),
             }
@@ -244,6 +366,7 @@ class SkillHub:
 
         if uploaded > 0:
             self._save_remote_manifest(manifest)
+            registry.save_to_oss(self._bucket, self._prefix())
 
         logger.info(
             "[SkillHub] push complete: %d uploaded, %d skipped, %d filtered, %d total",
@@ -487,7 +610,6 @@ class SkillHub:
                     local_dirs_by_name,
                 )
                 local_path = os.path.join(local_dir, "SKILL.md")
-                remote_sha = rec.get("sha256", "")
 
                 if name in skip_set and os.path.exists(local_path):
                     skipped += 1
@@ -495,23 +617,18 @@ class SkillHub:
                     logger.info("[SkillHub] preserved local skill during pull: %s", name)
                     continue
 
-                if os.path.exists(local_path):
-                    local_sha = _compute_sha256(local_path)
-                    if local_sha == remote_sha:
-                        skipped += 1
-                        self._remove_duplicate_local_skill_dirs(name, local_dir, local_dirs_by_name)
-                        continue
+                if os.path.isdir(local_dir) and self._local_bundle_matches_record(local_dir, rec):
+                    skipped += 1
+                    self._remove_duplicate_local_skill_dirs(name, local_dir, local_dirs_by_name)
+                    continue
 
                 try:
-                    result = self._bucket.get_object(self._skill_key(name))
-                    content = result.read()
+                    bundle = self._download_skill_bundle(name, rec)
                 except Exception as e:
                     logger.warning("[SkillHub] failed to download skill %s: %s", name, e)
                     continue
 
-                os.makedirs(local_dir, exist_ok=True)
-                with open(local_path, "wb") as f:
-                    f.write(content)
+                write_skill_bundle(local_dir, bundle, clean=True)
                 downloaded += 1
                 self._remove_duplicate_local_skill_dirs(name, local_dir, local_dirs_by_name)
                 logger.info("[SkillHub] pulled skill: %s", name)
@@ -568,40 +685,25 @@ class SkillHub:
                 resolved_targets[name] = target_dir
                 local_path = os.path.join(target_dir, "SKILL.md")
                 staged_dir = os.path.join(staging_dir, os.path.relpath(target_dir, skills_dir))
-                staged_path = os.path.join(staged_dir, "SKILL.md")
-                remote_sha = rec.get("sha256", "")
-                content: bytes
 
                 if name in skip_set and os.path.exists(local_path):
-                    with open(local_path, "rb") as f:
-                        content = f.read()
                     skipped += 1
-                    os.makedirs(staged_dir, exist_ok=True)
-                    with open(staged_path, "wb") as f:
-                        f.write(content)
+                    if os.path.isdir(target_dir):
+                        shutil.copytree(target_dir, staged_dir, dirs_exist_ok=True)
                     logger.info("[SkillHub] preserved local skill during pull: %s", name)
                     continue
 
-                if os.path.exists(local_path):
-                    local_sha = _compute_sha256(local_path)
-                    if local_sha == remote_sha:
-                        with open(local_path, "rb") as f:
-                            content = f.read()
-                        skipped += 1
-                        os.makedirs(staged_dir, exist_ok=True)
-                        with open(staged_path, "wb") as f:
-                            f.write(content)
-                        continue
+                if os.path.isdir(target_dir) and self._local_bundle_matches_record(target_dir, rec):
+                    skipped += 1
+                    shutil.copytree(target_dir, staged_dir, dirs_exist_ok=True)
+                    continue
 
                 try:
-                    result = self._bucket.get_object(self._skill_key(name))
-                    content = result.read()
+                    bundle = self._download_skill_bundle(name, rec)
                 except Exception as e:
                     raise RuntimeError(f"failed to download skill {name}: {e}") from e
 
-                os.makedirs(staged_dir, exist_ok=True)
-                with open(staged_path, "wb") as f:
-                    f.write(content)
+                write_skill_bundle(staged_dir, bundle, clean=True)
                 downloaded += 1
                 logger.info("[SkillHub] pulled skill: %s", name)
 

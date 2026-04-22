@@ -526,6 +526,9 @@ function compareLocalAndRemote(skill) {
       tone: "neutral",
     }
   }
+  if (skill.local_tree_sha && skill.remote_tree_sha && skill.local_tree_sha === skill.remote_tree_sha) {
+    return { key: "synced", label: l("已与共享正式版同步", "Synced with Shared Official Version"), tone: "published" }
+  }
   if (skill.local_sha && skill.remote_sha && skill.local_sha === skill.remote_sha) {
     return { key: "synced", label: l("已与共享正式版同步", "Synced with Shared Official Version"), tone: "published" }
   }

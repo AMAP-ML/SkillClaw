@@ -77,7 +77,8 @@ class DashboardStore:
                 CREATE INDEX IF NOT EXISTS idx_skills_name ON skills(name);
                 CREATE INDEX IF NOT EXISTS idx_skills_category ON skills(category);
                 CREATE INDEX IF NOT EXISTS idx_skills_source ON skills(source);
-                CREATE INDEX IF NOT EXISTS idx_skills_sessions ON skills(session_count DESC, observed_injection_count DESC);
+                CREATE INDEX IF NOT EXISTS idx_skills_sessions
+                    ON skills(session_count DESC, observed_injection_count DESC);
 
                 CREATE TABLE IF NOT EXISTS skill_versions (
                     skill_id TEXT NOT NULL,
@@ -326,10 +327,7 @@ class DashboardStore:
         self.initialize()
         with self._connect() as conn:
             rows = conn.execute("SELECT key, value FROM meta ORDER BY key").fetchall()
-        return {
-            str(row["key"]): _json_loads(row["value"], row["value"])
-            for row in rows
-        }
+        return {str(row["key"]): _json_loads(row["value"], row["value"]) for row in rows}
 
     def _skill_summary_from_row(self, row: sqlite3.Row) -> dict[str, Any]:
         return {
@@ -600,9 +598,7 @@ class DashboardStore:
                 "observed_injections": int(
                     conn.execute("SELECT COALESCE(SUM(observed_injection_count), 0) FROM skills").fetchone()[0]
                 ),
-                "observed_reads": int(
-                    conn.execute("SELECT COALESCE(SUM(read_count), 0) FROM skills").fetchone()[0]
-                ),
+                "observed_reads": int(conn.execute("SELECT COALESCE(SUM(read_count), 0) FROM skills").fetchone()[0]),
                 "observed_modifications": int(
                     conn.execute("SELECT COALESCE(SUM(modified_count), 0) FROM skills").fetchone()[0]
                 ),

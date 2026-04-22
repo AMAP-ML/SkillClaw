@@ -345,8 +345,7 @@ class ConfigStore:
             dashboard_host=str(dashboard.get("host", "127.0.0.1") or "127.0.0.1"),
             dashboard_port=int(dashboard.get("port", 3788) or 3788),
             dashboard_db_path=str(
-                dashboard.get("db_path", str(CONFIG_DIR / "dashboard.db"))
-                or str(CONFIG_DIR / "dashboard.db")
+                dashboard.get("db_path", str(CONFIG_DIR / "dashboard.db")) or str(CONFIG_DIR / "dashboard.db")
             ),
             dashboard_sync_on_start=bool(dashboard.get("sync_on_start", True)),
             dashboard_include_shared=bool(dashboard.get("include_shared", True)),

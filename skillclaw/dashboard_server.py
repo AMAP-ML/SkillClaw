@@ -83,11 +83,7 @@ def _require_sharing_hub(config: SkillClawConfig) -> SkillHub:
 
 
 def _local_sessions_from_snapshot(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
-    return [
-        item
-        for item in (snapshot.get("sessions") or [])
-        if str(item.get("source", "") or "") == "local"
-    ]
+    return [item for item in (snapshot.get("sessions") or []) if str(item.get("source", "") or "") == "local"]
 
 
 def _normalize_selection(items: Any, *, field_name: str) -> list[str] | None:
@@ -124,6 +120,7 @@ class DashboardService:
     def _embedded_evolve_server(self):
         from evolve_server.core.config import EvolveServerConfig
         from evolve_server.engines.workflow import EvolveServer
+
         from .validation_store import ValidationStore
 
         evolve_config = EvolveServerConfig.from_skillclaw_config(self.config)
@@ -191,9 +188,7 @@ class DashboardService:
         sessions = _local_sessions_from_snapshot(snapshot)
         total_local_sessions = len(sessions)
         session_lookup = {
-            str(item.get("session_id", "") or ""): item
-            for item in sessions
-            if str(item.get("session_id", "") or "")
+            str(item.get("session_id", "") or ""): item for item in sessions if str(item.get("session_id", "") or "")
         }
         selection = list(session_ids or [])
         missing_ids: list[str] = []

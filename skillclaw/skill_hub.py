@@ -416,24 +416,12 @@ class SkillHub:
         local_dirs_by_name = self._list_local_skill_dirs(skills_dir)
         local_skills = {name: dirs[-1] for name, dirs in local_dirs_by_name.items() if dirs}
         manifest = self._load_remote_manifest()
-        skip_set = {
-            str(name or "").strip()
-            for name in (skip_names or [])
-            if str(name or "").strip()
-        }
-        include_set = {
-            str(name or "").strip()
-            for name in (include_names or [])
-            if str(name or "").strip()
-        }
+        skip_set = {str(name or "").strip() for name in (skip_names or []) if str(name or "").strip()}
+        include_set = {str(name or "").strip() for name in (include_names or []) if str(name or "").strip()}
         if include_set and mirror:
             mirror = False
         if include_set:
-            manifest = {
-                name: rec
-                for name, rec in manifest.items()
-                if name in include_set
-            }
+            manifest = {name: rec for name, rec in manifest.items() if name in include_set}
         missing_names = sorted(include_set - set(manifest))
         requested_count = len(include_set)
         matched_remote = len(manifest)
@@ -465,6 +453,7 @@ class SkillHub:
                     }
                 )
             return payload
+
         if not manifest:
             # Empty/failed manifest is treated as no-op to avoid accidental wipe.
             if include_set:
@@ -473,10 +462,7 @@ class SkillHub:
                     ", ".join(missing_names) or "(empty request)",
                 )
             else:
-                logger.warning(
-                    "[SkillHub] remote manifest empty; skip mirror pull "
-                    "(downloaded=0 skipped=0 deleted=0)"
-                )
+                logger.warning("[SkillHub] remote manifest empty; skip mirror pull (downloaded=0 skipped=0 deleted=0)")
             return _result(
                 downloaded=0,
                 skipped=0,

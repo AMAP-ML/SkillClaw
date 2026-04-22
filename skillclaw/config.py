@@ -102,6 +102,17 @@ class SkillClawConfig:
     validation_max_concurrency: int = 1
 
     # ------------------------------------------------------------------ #
+    # Dashboard                                                           #
+    # ------------------------------------------------------------------ #
+    dashboard_enabled: bool = False
+    dashboard_host: str = "127.0.0.1"
+    dashboard_port: int = 3788
+    dashboard_db_path: str = "~/.skillclaw/dashboard.db"
+    dashboard_sync_on_start: bool = True
+    dashboard_include_shared: bool = True
+    dashboard_evolve_server_url: str = ""
+
+    # ------------------------------------------------------------------ #
     # Cloud / Bedrock                                                      #
     # ------------------------------------------------------------------ #
     bedrock_region: str = "us-east-1"

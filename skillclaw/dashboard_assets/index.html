@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SkillClaw 技能演化看板</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand-block">
+          <p class="kicker">SkillClaw Latest</p>
+          <h1 id="brand-title">技能演化看板</h1>
+          <p id="brand-copy" class="sidebar-copy">
+            看你自己的技能状态、本地与共享库同步、候选验证、最终发布和会话追溯。
+          </p>
+        </div>
+
+        <nav class="nav-list" aria-label="Dashboard navigation">
+          <button class="nav-item active" data-view="overview" type="button">
+            <span id="nav-overview-title" class="nav-title">总览</span>
+            <span id="nav-overview-meta" class="nav-meta">先看整体状态</span>
+          </button>
+          <button class="nav-item" data-view="local" type="button">
+            <span id="nav-local-title" class="nav-title">我的技能</span>
+            <span id="nav-local-meta" class="nav-meta">0 个本地技能</span>
+          </button>
+          <button class="nav-item" data-view="candidate" type="button">
+            <span id="nav-candidate-title" class="nav-title">候选池</span>
+            <span id="nav-candidate-meta" class="nav-meta">0 条候选</span>
+          </button>
+          <button class="nav-item" data-view="final" type="button">
+            <span id="nav-final-title" class="nav-title">最终池</span>
+            <span id="nav-final-meta" class="nav-meta">0 个共享技能</span>
+          </button>
+          <button class="nav-item" data-view="sessions" type="button">
+            <span id="nav-sessions-title" class="nav-title">会话追溯</span>
+            <span id="nav-sessions-meta" class="nav-meta">默认看我的会话</span>
+          </button>
+        </nav>
+
+        <section class="sidebar-section">
+          <p id="sidebar-status-title" class="kicker">当前状态</p>
+          <div id="sidebar-status" class="stack"></div>
+        </section>
+      </aside>
+
+      <main class="main-shell">
+        <header class="page-hero">
+          <div>
+            <p id="hero-kicker" class="kicker">总览首页</p>
+            <h2 id="hero-title">我的技能状态</h2>
+          </div>
+          <div class="hero-actions">
+            <button id="btn-locale" class="secondary" data-op="toggle-locale" type="button">English</button>
+            <button id="btn-refresh" class="secondary" data-op="refresh" type="button">刷新数据</button>
+            <button id="btn-sync" class="secondary" data-op="sync-projection" type="button">重建投影</button>
+          </div>
+        </header>
+
+        <section id="message-strip" class="message-strip hidden"></section>
+
+        <section class="view active" data-view-panel="overview">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p id="overview-kicker" class="kicker">总览</p>
+                <h3 id="overview-title">现在这套技能更新链路处在什么状态</h3>
+              </div>
+              <p id="overview-copy" class="panel-copy">
+                这里汇总本地同步、候选验证、最终发布和会话来源四类状态。
+              </p>
+            </div>
+            <div id="overview-metrics" class="metric-grid"></div>
+          </section>
+
+          <div class="two-column">
+            <section class="panel">
+              <div class="panel-head compact">
+                <div>
+                  <p id="watchlist-kicker" class="kicker">需要关注</p>
+                  <h3 id="watchlist-title">当前值得查看的变化</h3>
+                </div>
+              </div>
+              <div id="overview-watchlist" class="stack panel-body"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head compact">
+                <div>
+                  <p id="scope-kicker" class="kicker">当前范围</p>
+                  <h3 id="scope-title">你现在看到的是哪部分数据</h3>
+                </div>
+              </div>
+              <div id="overview-context" class="stack panel-body"></div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p id="events-kicker" class="kicker">最近事件</p>
+                <h3 id="events-title">候选生成、验证反馈、最终决策</h3>
+              </div>
+              <p id="events-copy" class="panel-copy">按时间倒序展示最近 12 条流程事件，方便先抓住变化再下钻。</p>
+            </div>
+            <div id="overview-events" class="stack panel-body"></div>
+          </section>
+        </section>
+
+        <section class="view" data-view-panel="local">
+          <section class="panel">
+            <div class="panel-head wrap">
+              <div>
+                <p id="local-kicker" class="kicker">我的技能</p>
+                <h3 id="local-title">本地技能和共享正式版是否一致</h3>
+                <p id="local-copy" class="panel-copy">这里看你的本地技能、它们是否已同步，以及最近关联了哪些会话。</p>
+              </div>
+              <div class="controls">
+                <input id="local-search" type="search" placeholder="搜索名称、描述或分类" />
+              </div>
+            </div>
+
+            <div class="split-layout">
+              <div id="local-list" class="stack panel-body panel-scroll"></div>
+              <div id="local-detail" class="detail-shell panel-body empty-state">
+                选择一个本地技能，查看同步状态、版本链和相关会话。
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" data-view-panel="candidate">
+          <section class="panel">
+            <div class="panel-head wrap">
+              <div>
+                <p id="candidate-kicker" class="kicker">候选池</p>
+                <h3 id="candidate-title">哪些技能正在等待验证，哪些已经进入最终池</h3>
+                <p id="candidate-copy" class="panel-copy">
+                  这里只看候选技能的真实验证进度：候选内容、验证客户端、决策时间，以及它依赖哪些会话证据。
+                </p>
+              </div>
+              <div class="controls row">
+                <input id="candidate-search" type="search" placeholder="搜索技能名、候选编号或说明" />
+                <select id="candidate-status">
+                  <option id="candidate-status-all" value="">全部状态</option>
+                  <option id="candidate-status-pending" value="pending">待验证</option>
+                  <option id="candidate-status-review" value="review">已有反馈</option>
+                  <option id="candidate-status-published" value="published">已入最终池</option>
+                  <option id="candidate-status-rejected" value="rejected">已拒绝</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="split-layout">
+              <div id="candidate-list" class="stack panel-body panel-scroll"></div>
+              <div id="candidate-detail" class="detail-shell panel-body empty-state">
+                选择一个候选技能，查看它的验证轨迹和会话来源。
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" data-view-panel="final">
+          <section class="panel">
+            <div class="panel-head wrap">
+              <div>
+                <p id="final-kicker" class="kicker">最终池</p>
+                <h3 id="final-title">共享技能当前正式版本和发布历史</h3>
+                <p id="final-copy" class="panel-copy">这里只显示已经进入共享库的正式技能，用来观察版本演进、发布时间和本地同步状态。</p>
+              </div>
+              <div class="controls">
+                <input id="final-search" type="search" placeholder="搜索共享技能" />
+              </div>
+            </div>
+
+            <div class="split-layout">
+              <div id="final-list" class="stack panel-body panel-scroll"></div>
+              <div id="final-detail" class="detail-shell panel-body empty-state">
+                选择一个最终池技能，查看版本历史、发布链路和相关会话。
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" data-view-panel="sessions">
+          <section class="panel">
+            <div class="panel-head wrap">
+              <div>
+                <p id="sessions-kicker" class="kicker">会话追溯</p>
+                <h3 id="sessions-title">我的会话，以及支撑候选技能的共享会话</h3>
+                <p id="sessions-copy" class="panel-copy">默认先看你的本地会话；如果需要追踪候选来源，可以切到全部会话继续查。</p>
+              </div>
+              <div class="controls row">
+                <input id="session-search" type="search" placeholder="搜索会话 ID、摘要或技能名" />
+                <select id="session-source">
+                  <option id="session-source-local" value="local">我的会话</option>
+                  <option id="session-source-all" value="all">全部会话</option>
+                  <option id="session-source-shared" value="shared">共享会话</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="split-layout">
+              <div id="session-list" class="stack panel-body panel-scroll"></div>
+              <div id="session-detail" class="detail-shell panel-body empty-state">
+                选择一个会话，查看逐轮内容、关联技能，以及它是否进入候选池。
+              </div>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/assets/app.js"></script>
+  </body>
+</html>

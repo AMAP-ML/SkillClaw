@@ -123,8 +123,12 @@ Everything above is what one user gets. Now scale it up: when you join a shared 
 
 ## News
 
+- **2026/04/22** — Added a bilingual dashboard with `skillclaw dashboard sync` and `skillclaw dashboard serve` for inspecting local/shared skills, validation progress, version history, and session traces.
+- **2026/04/20** — Added [Codex](https://github.com/openai/codex) and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) integration with proxy auto-configuration, native skills-directory defaults, and `doctor` / `restore` commands.
+- **2026/04/17** — Added [QwenPaw](https://github.com/agentscope-ai/QwenPaw) integration and updated the docs for broader multi-agent compatibility.
+- **2026/04/17** — Added full [Hermes](https://github.com/NousResearch/hermes-agent) integration, per-turn skill tracking, `doctor hermes`, `skillclaw skills *` management commands, and a major docs overhaul.
 - **2026/04/14** — WeChat discussion group is live! [Join the group](assets/image.png) to chat with us.
-- **2026/04/14** — Seamless integration with [Hermes](https://github.com/NousResearch/hermes-agent) is now available.
+- **2026/04/14** — Initial [Hermes](https://github.com/NousResearch/hermes-agent) support landed together with the first README refresh.
 - **2026/04/12** — Active discussion with [Deer-Flow](https://github.com/bytedance/deer-flow/discussions/2133) on cross-framework skill sharing.
 - **2026/04/11** — SkillClaw ranked **#2 Paper of the Day** on [Hugging Face Daily Papers](https://huggingface.co/papers/2604.08377)!
 - **2026/04/10** — SkillClaw is now open source! Code released on [GitHub](https://github.com/AMAP-ML/SkillClaw).
@@ -310,6 +314,46 @@ skillclaw validation run-once --force
 ```
 
 `skillclaw start --daemon` will automatically run the background validator afterward. `run-once --force` is the quickest way to test the path without waiting for the idle timer.
+
+### Optional: inspect skills and sessions with the dashboard
+
+The dashboard is a local visualization layer for the current SkillClaw snapshot. It is useful when you want to inspect:
+
+- local skills and whether they match the shared official version
+- candidate validation jobs and their current status
+- published shared skills and version history
+- local and shared sessions behind skill updates
+
+The dashboard commands are available from the same `skillclaw` install:
+
+```bash
+skillclaw dashboard sync
+skillclaw dashboard serve
+```
+
+If you want to point the dashboard at a local shared root and a specific group:
+
+```bash
+skillclaw dashboard sync \
+  --sharing-local-root /path/to/shared/root \
+  --sharing-group-id my-group \
+  --sharing-user-alias alice
+
+skillclaw dashboard serve \
+  --host 127.0.0.1 \
+  --port 3791 \
+  --sharing-local-root /path/to/shared/root \
+  --sharing-group-id my-group \
+  --sharing-user-alias alice
+```
+
+Then open:
+
+```text
+http://127.0.0.1:3791
+```
+
+By default, `serve` rebuilds the snapshot on startup. If you already ran `skillclaw dashboard sync`, you can start faster with `--no-sync-on-start`.
 
 ## Server Guide
 

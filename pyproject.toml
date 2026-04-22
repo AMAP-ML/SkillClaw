@@ -55,6 +55,9 @@ skillclaw-evolve-server = "evolve_server.__main__:main"
 where = ["."]
 include = ["skillclaw*", "evolve_server*"]
 
+[tool.setuptools.package-data]
+skillclaw = ["dashboard_assets/*"]
+
 [tool.ruff]
 line-length = 120
 

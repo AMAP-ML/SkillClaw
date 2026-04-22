@@ -546,6 +546,170 @@ def validation_run_once(force: bool):
 
 
 @skillclaw.group()
+def dashboard():
+    """Dashboard and skill visualization commands."""
+
+
+def _apply_dashboard_runtime_overrides(
+    cfg,
+    *,
+    host: str | None = None,
+    port: int | None = None,
+    db_path: str | None = None,
+    no_sync_on_start: bool = False,
+    sharing_local_root: str | None = None,
+    sharing_group_id: str | None = None,
+    sharing_user_alias: str | None = None,
+    include_shared: bool | None = None,
+    evolve_server_url: str | None = None,
+):
+    if host:
+        cfg.dashboard_host = host
+    if port:
+        cfg.dashboard_port = port
+    if db_path:
+        cfg.dashboard_db_path = db_path
+    if no_sync_on_start:
+        cfg.dashboard_sync_on_start = False
+    if sharing_local_root:
+        cfg.sharing_enabled = True
+        cfg.sharing_backend = "local"
+        cfg.sharing_local_root = sharing_local_root
+    if sharing_group_id:
+        cfg.sharing_group_id = sharing_group_id
+    if sharing_user_alias:
+        cfg.sharing_user_alias = sharing_user_alias
+    if include_shared is not None:
+        cfg.dashboard_include_shared = include_shared
+    if evolve_server_url is not None:
+        cfg.dashboard_evolve_server_url = evolve_server_url
+    return cfg
+
+
+@dashboard.command(name="sync")
+@click.option(
+    "--db-path",
+    type=click.Path(dir_okay=False, path_type=str),
+    default=None,
+    help="Override dashboard SQLite file path.",
+)
+@click.option(
+    "--sharing-local-root",
+    type=click.Path(file_okay=False, path_type=str),
+    default=None,
+    help="Use a local filesystem directory as the shared storage root for dashboard sync.",
+)
+@click.option("--sharing-group-id", type=str, default=None, help="Override shared storage group id.")
+@click.option("--sharing-user-alias", type=str, default=None, help="Override sharing user alias.")
+@click.option(
+    "--include-shared/--no-include-shared",
+    default=None,
+    help="Control whether shared storage is included in the dashboard snapshot.",
+)
+@click.option("--evolve-server-url", type=str, default=None, help="Override evolve server base URL.")
+def dashboard_sync(
+    db_path: str | None,
+    sharing_local_root: str | None,
+    sharing_group_id: str | None,
+    sharing_user_alias: str | None,
+    include_shared: bool | None,
+    evolve_server_url: str | None,
+):
+    """Refresh the dashboard SQLite projection."""
+    from .dashboard_server import DashboardService
+
+    cs = ConfigStore()
+    cfg = _apply_dashboard_runtime_overrides(
+        cs.to_skillclaw_config(),
+        db_path=db_path,
+        sharing_local_root=sharing_local_root,
+        sharing_group_id=sharing_group_id,
+        sharing_user_alias=sharing_user_alias,
+        include_shared=include_shared,
+        evolve_server_url=evolve_server_url,
+    )
+    service = DashboardService(cfg)
+    result = service.sync()
+    summary = result["summary"]
+    click.echo(
+        f"Dashboard snapshot synced: "
+        f"{summary['skills']} skills, "
+        f"{summary['sessions']} sessions, "
+        f"{summary['validation_jobs']} validation jobs."
+    )
+    click.echo(f"SQLite: {cfg.dashboard_db_path}")
+    warnings = summary.get("warnings") or []
+    if warnings:
+        click.echo("Warnings:")
+        for item in warnings:
+            click.echo(f"  - {item}")
+
+
+@dashboard.command(name="serve")
+@click.option("--host", type=str, default=None, help="Override dashboard host.")
+@click.option("--port", type=int, default=None, help="Override dashboard port.")
+@click.option(
+    "--db-path",
+    type=click.Path(dir_okay=False, path_type=str),
+    default=None,
+    help="Override dashboard SQLite file path.",
+)
+@click.option(
+    "--no-sync-on-start",
+    is_flag=True,
+    default=False,
+    help="Start the dashboard without rebuilding the snapshot first.",
+)
+@click.option(
+    "--sharing-local-root",
+    type=click.Path(file_okay=False, path_type=str),
+    default=None,
+    help="Use a local filesystem directory as the shared storage root while serving the dashboard.",
+)
+@click.option("--sharing-group-id", type=str, default=None, help="Override shared storage group id.")
+@click.option("--sharing-user-alias", type=str, default=None, help="Override sharing user alias.")
+@click.option(
+    "--include-shared/--no-include-shared",
+    default=None,
+    help="Control whether shared storage is included in the dashboard snapshot.",
+)
+@click.option("--evolve-server-url", type=str, default=None, help="Override evolve server base URL.")
+def dashboard_serve(
+    host: str | None,
+    port: int | None,
+    db_path: str | None,
+    no_sync_on_start: bool,
+    sharing_local_root: str | None,
+    sharing_group_id: str | None,
+    sharing_user_alias: str | None,
+    include_shared: bool | None,
+    evolve_server_url: str | None,
+):
+    """Serve the dashboard UI and API."""
+    from .dashboard_server import serve_dashboard
+
+    cs = ConfigStore()
+    cfg = _apply_dashboard_runtime_overrides(
+        cs.to_skillclaw_config(),
+        host=host,
+        port=port,
+        db_path=db_path,
+        no_sync_on_start=no_sync_on_start,
+        sharing_local_root=sharing_local_root,
+        sharing_group_id=sharing_group_id,
+        sharing_user_alias=sharing_user_alias,
+        include_shared=include_shared,
+        evolve_server_url=evolve_server_url,
+    )
+
+    click.echo(
+        f"Starting SkillClaw dashboard at http://{cfg.dashboard_host}:{cfg.dashboard_port} "
+        f"(db: {cfg.dashboard_db_path})"
+    )
+    serve_dashboard(cfg)
+
+
+@skillclaw.group()
 def skills():
     """Skill management commands."""
 

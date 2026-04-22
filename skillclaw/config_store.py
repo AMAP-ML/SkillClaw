@@ -78,6 +78,15 @@ _DEFAULTS: dict = {
         "max_jobs_per_day": 5,
         "max_concurrency": 1,
     },
+    "dashboard": {
+        "enabled": False,
+        "host": "127.0.0.1",
+        "port": 3788,
+        "db_path": str(CONFIG_DIR / "dashboard.db"),
+        "sync_on_start": True,
+        "include_shared": True,
+        "evolve_server_url": "",
+    },
 }
 
 
@@ -253,6 +262,7 @@ class ConfigStore:
 
         sharing = data.get("sharing", {})
         validation = data.get("validation", {})
+        dashboard = data.get("dashboard", {})
         sharing_backend = _infer_sharing_backend(sharing)
         sharing_endpoint = _first_non_empty(sharing, "endpoint")
         sharing_bucket = _first_non_empty(sharing, "bucket")
@@ -331,6 +341,16 @@ class ConfigStore:
             validation_poll_interval_seconds=int(validation.get("poll_interval_seconds", 60)),
             validation_max_jobs_per_day=int(validation.get("max_jobs_per_day", 5)),
             validation_max_concurrency=max(1, int(validation.get("max_concurrency", 1))),
+            dashboard_enabled=bool(dashboard.get("enabled", False)),
+            dashboard_host=str(dashboard.get("host", "127.0.0.1") or "127.0.0.1"),
+            dashboard_port=int(dashboard.get("port", 3788) or 3788),
+            dashboard_db_path=str(
+                dashboard.get("db_path", str(CONFIG_DIR / "dashboard.db"))
+                or str(CONFIG_DIR / "dashboard.db")
+            ),
+            dashboard_sync_on_start=bool(dashboard.get("sync_on_start", True)),
+            dashboard_include_shared=bool(dashboard.get("include_shared", True)),
+            dashboard_evolve_server_url=str(dashboard.get("evolve_server_url", "") or ""),
         )
 
     def describe(self) -> str:
@@ -339,6 +359,7 @@ class ConfigStore:
         llm = data.get("llm", {})
         skills = data.get("skills", {})
         prm = data.get("prm", {})
+        dashboard = data.get("dashboard", {})
         claw_type = str(data.get("claw_type", "openclaw") or "openclaw")
         effective_skills_dir = resolve_skills_dir(
             skills.get("dir", str(_DEFAULT_SKILLS_DIR)),
@@ -397,5 +418,11 @@ class ConfigStore:
             f"validation.mode: {_normalize_validation_mode(validation.get('mode', 'replay'))}",
             f"validation.idle_after: {validation.get('idle_after_seconds', 300)}",
             f"validation.poll_interval: {validation.get('poll_interval_seconds', 60)}",
+            f"dashboard.enabled: {dashboard.get('enabled', False)}",
+            f"dashboard.host: {dashboard.get('host', '127.0.0.1')}",
+            f"dashboard.port: {dashboard.get('port', 3788)}",
+            f"dashboard.db_path: {dashboard.get('db_path', str(CONFIG_DIR / 'dashboard.db'))}",
+            f"dashboard.include_shared: {dashboard.get('include_shared', True)}",
+            f"dashboard.evolve_server_url: {dashboard.get('evolve_server_url', '') or '(not set)'}",
         ]
         return "\n".join(lines)

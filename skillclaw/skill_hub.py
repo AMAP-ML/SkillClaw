@@ -382,6 +382,7 @@ class SkillHub:
         skills_dir: str,
         mirror: bool = True,
         skip_names: Optional[Collection[str]] = None,
+        include_names: Optional[Collection[str]] = None,
     ) -> dict[str, Any]:
         """Mirror cloud skills to local directory with backup + rollback safety.
 
@@ -396,6 +397,10 @@ class SkillHub:
             local extras).
         skip_names:
             Skill names to preserve from local disk during this pull.
+        include_names:
+            Optional subset of remote skill names to download. When provided,
+            pull is forced into incremental mode to avoid deleting unrelated
+            local skills.
 
         Returns:
             {
@@ -411,18 +416,75 @@ class SkillHub:
         local_dirs_by_name = self._list_local_skill_dirs(skills_dir)
         local_skills = {name: dirs[-1] for name, dirs in local_dirs_by_name.items() if dirs}
         manifest = self._load_remote_manifest()
-        skip_set = {str(name or "").strip() for name in (skip_names or []) if str(name or "").strip()}
+        skip_set = {
+            str(name or "").strip()
+            for name in (skip_names or [])
+            if str(name or "").strip()
+        }
+        include_set = {
+            str(name or "").strip()
+            for name in (include_names or [])
+            if str(name or "").strip()
+        }
+        if include_set and mirror:
+            mirror = False
+        if include_set:
+            manifest = {
+                name: rec
+                for name, rec in manifest.items()
+                if name in include_set
+            }
+        missing_names = sorted(include_set - set(manifest))
+        requested_count = len(include_set)
+        matched_remote = len(manifest)
+
+        def _result(
+            *,
+            downloaded: int,
+            skipped: int,
+            deleted: int,
+            total_remote: int,
+            restored_from_backup: bool,
+            backup_dir: str,
+        ) -> dict[str, Any]:
+            payload: dict[str, Any] = {
+                "downloaded": downloaded,
+                "skipped": skipped,
+                "deleted": deleted,
+                "total_remote": total_remote,
+                "restored_from_backup": restored_from_backup,
+                "backup_dir": backup_dir,
+            }
+            if include_set:
+                payload.update(
+                    {
+                        "requested": requested_count,
+                        "matched_remote": matched_remote,
+                        "missing": len(missing_names),
+                        "missing_names": missing_names,
+                    }
+                )
+            return payload
         if not manifest:
             # Empty/failed manifest is treated as no-op to avoid accidental wipe.
-            logger.warning("[SkillHub] remote manifest empty; skip mirror pull (downloaded=0 skipped=0 deleted=0)")
-            return {
-                "downloaded": 0,
-                "skipped": 0,
-                "deleted": 0,
-                "total_remote": 0,
-                "restored_from_backup": False,
-                "backup_dir": "",
-            }
+            if include_set:
+                logger.info(
+                    "[SkillHub] none of the requested remote skills matched the manifest: %s",
+                    ", ".join(missing_names) or "(empty request)",
+                )
+            else:
+                logger.warning(
+                    "[SkillHub] remote manifest empty; skip mirror pull "
+                    "(downloaded=0 skipped=0 deleted=0)"
+                )
+            return _result(
+                downloaded=0,
+                skipped=0,
+                deleted=0,
+                total_remote=0,
+                restored_from_backup=False,
+                backup_dir="",
+            )
 
         downloaded = 0
         skipped = 0
@@ -474,14 +536,14 @@ class SkillHub:
                 skipped,
                 len(manifest),
             )
-            return {
-                "downloaded": downloaded,
-                "skipped": skipped,
-                "deleted": 0,
-                "total_remote": len(manifest),
-                "restored_from_backup": False,
-                "backup_dir": "",
-            }
+            return _result(
+                downloaded=downloaded,
+                skipped=skipped,
+                deleted=0,
+                total_remote=len(manifest),
+                restored_from_backup=False,
+                backup_dir="",
+            )
 
         parent_dir = os.path.dirname(os.path.abspath(skills_dir))
         base_name = os.path.basename(os.path.abspath(skills_dir))
@@ -496,14 +558,14 @@ class SkillHub:
             shutil.copytree(skills_dir, backup_dir)
         except Exception as e:
             logger.warning("[SkillHub] backup before pull failed: %s", e)
-            return {
-                "downloaded": 0,
-                "skipped": 0,
-                "deleted": 0,
-                "total_remote": len(manifest),
-                "restored_from_backup": False,
-                "backup_dir": "",
-            }
+            return _result(
+                downloaded=0,
+                skipped=0,
+                deleted=0,
+                total_remote=len(manifest),
+                restored_from_backup=False,
+                backup_dir="",
+            )
 
         os.makedirs(staging_dir, exist_ok=True)
         resolved_targets: dict[str, str] = {}
@@ -590,14 +652,14 @@ class SkillHub:
             except Exception as restore_err:
                 logger.error("[SkillHub] backup restore failed: %s", restore_err)
 
-            return {
-                "downloaded": 0,
-                "skipped": 0,
-                "deleted": 0,
-                "total_remote": len(manifest),
-                "restored_from_backup": restored_from_backup,
-                "backup_dir": backup_dir,
-            }
+            return _result(
+                downloaded=0,
+                skipped=0,
+                deleted=0,
+                total_remote=len(manifest),
+                restored_from_backup=restored_from_backup,
+                backup_dir=backup_dir,
+            )
         finally:
             if os.path.isdir(staging_dir):
                 shutil.rmtree(staging_dir, ignore_errors=True)
@@ -610,14 +672,14 @@ class SkillHub:
             len(manifest),
         )
         self._prune_backups(backup_root, backup_prefix, keep=3)
-        return {
-            "downloaded": downloaded,
-            "skipped": skipped,
-            "deleted": deleted,
-            "total_remote": len(manifest),
-            "restored_from_backup": False,
-            "backup_dir": backup_dir,
-        }
+        return _result(
+            downloaded=downloaded,
+            skipped=skipped,
+            deleted=deleted,
+            total_remote=len(manifest),
+            restored_from_backup=False,
+            backup_dir=backup_dir,
+        )
 
     # ------------------------------------------------------------------ #
     # List remote skills                                                   #

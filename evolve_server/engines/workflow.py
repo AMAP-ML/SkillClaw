@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from skillclaw.object_store import build_object_store
+from skillclaw.skill_bundle import bundle_tree_sha256
 from skillclaw.validation_store import ValidationStore
 
 from ..core.config import EvolveServerConfig
@@ -47,6 +48,7 @@ from ..storage.oss_helpers import (
     load_manifest,
     read_json_object,
     save_manifest,
+    save_version_bundle,
 )
 
 logger = logging.getLogger(__name__)
@@ -178,10 +180,24 @@ class EvolveServer:
         skill_id = self._id_registry.get_or_create(name)
         md_content = build_skill_md(skill)
         object_key = f"{self._prefix}skills/{name}/SKILL.md"
-        self._bucket.put_object(object_key, md_content.encode("utf-8"))
+        md_bytes = md_content.encode("utf-8")
+        self._bucket.put_object(object_key, md_bytes)
 
-        content_sha = hashlib.sha256(md_content.encode("utf-8")).hexdigest()
-        version = self._id_registry.record_update(name, content_sha, action=action)
+        content_sha = hashlib.sha256(md_bytes).hexdigest()
+        tree_sha = bundle_tree_sha256({"SKILL.md": md_bytes})
+        bundle_record = {
+            "format": "bundle_v1",
+            "entrypoint": "SKILL.md",
+            "tree_sha256": tree_sha,
+            "files": [{"path": "SKILL.md", "sha256": content_sha, "size": len(md_bytes)}],
+        }
+        version = self._id_registry.record_update(
+            name,
+            content_sha,
+            action=action,
+            bundle_record=bundle_record,
+        )
+        save_version_bundle(self._bucket, self._prefix, name, version, {"SKILL.md": md_bytes})
 
         manifest = self._load_remote_skills()
         manifest[name] = {
@@ -189,6 +205,10 @@ class EvolveServer:
             "skill_id": skill_id,
             "version": version,
             "sha256": content_sha,
+            "tree_sha256": tree_sha,
+            "format": "bundle_v1",
+            "entrypoint": "SKILL.md",
+            "files": bundle_record["files"],
             "uploaded_by": "evolve_server",
             "uploaded_at": datetime.now(timezone.utc).isoformat(),
             "description": skill.get("description", ""),

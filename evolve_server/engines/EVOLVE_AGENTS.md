@@ -14,6 +14,9 @@ workspace/
 ├── skills/                ← input+output: current skill library
 │   └── <skill-name>/
 │       ├── SKILL.md       ← current version (refreshed from storage each round)
+│       ├── references/    ← optional reference docs / prompts / notes
+│       ├── scripts/       ← optional helper scripts / tooling
+│       ├── assets/        ← optional templates / binaries / other assets
 │       └── history/       ← persistent across rounds only in `--no-fresh` mode
 │           ├── v1.md      ← previous SKILL.md snapshot
 │           ├── v1_evidence.md
@@ -30,10 +33,10 @@ workspace/
 2. **Analyze** the sessions: identify patterns, failures, successes, and
    which skills (if any) were referenced.
 3. **Decide** what actions to take for each skill or pattern.
-4. **Execute** by writing new or updated `SKILL.md` files in `skills/`.
+4. **Execute** by writing new or updated skill bundles in `skills/`.
 
 Work through these steps autonomously. Use your file-reading and writing
-tools to inspect session data and produce skill files.
+tools to inspect session data and produce skill bundles.
 
 **File access boundary**: All your file operations MUST stay within this
 workspace directory. The workspace contains copies of all data you need —
@@ -151,10 +154,16 @@ No action needed. Use when:
 ## Step 4: Execute — Write Skill Files
 
 ### For improve_skill / optimize_description:
-Edit the existing `skills/<name>/SKILL.md` file in place.
+Edit the existing `skills/<name>/` bundle in place. `SKILL.md` remains the
+entrypoint, but you may also update supporting files such as
+`references/`, `scripts/`, `assets/`, and `history/` when the evidence
+shows the skill needs them.
 
 ### For create_skill:
-Create a new directory `skills/<new-name>/SKILL.md`.
+Create a new directory `skills/<new-name>/SKILL.md`. If the skill needs
+supporting resources, you may also create additional files under
+`references/`, `scripts/`, `assets/`, or other subdirectories inside the
+same skill folder.
 
 ### SKILL.md Format
 

@@ -59,6 +59,8 @@ from typing import Any, Dict, Optional
 
 import yaml
 
+from .skill_bundle import list_skill_bundle_paths
+
 logger = logging.getLogger(__name__)
 
 _SAFE_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,63}$")
@@ -513,18 +515,28 @@ class SkillManager:
         ]
 
     def get_skill_path_map(self) -> Dict[str, Dict[str, str]]:
-        """Return a mapping from file_path → {skill_id, skill_name}.
+        """Return a mapping from bundle file path → {skill_id, skill_name}.
 
         Used by the server to resolve which skill a ``read`` tool call targets.
         """
         path_map: Dict[str, Dict[str, str]] = {}
         for s in self.get_all_skills():
-            for fp in [s.get("file_path", ""), self._public_skill_path(s)]:
-                if fp:
-                    path_map[fp] = {
-                        "skill_id": s.get("id", ""),
-                        "skill_name": s.get("name", ""),
-                    }
+            skill_dir = os.path.dirname(str(s.get("file_path", "") or ""))
+            bundle_paths = list_skill_bundle_paths(skill_dir) if skill_dir else []
+            bundle_paths = bundle_paths or ["SKILL.md"]
+            public_dir = os.path.dirname(self._public_skill_path(s)) if self._public_skill_path(s) else ""
+            for rel_path in bundle_paths:
+                locations = []
+                if skill_dir:
+                    locations.append(os.path.realpath(os.path.join(skill_dir, rel_path)))
+                if public_dir:
+                    locations.append(os.path.realpath(os.path.join(public_dir, rel_path)))
+                for fp in locations:
+                    if fp:
+                        path_map[fp] = {
+                            "skill_id": s.get("id", ""),
+                            "skill_name": s.get("name", ""),
+                        }
         return path_map
 
     def _public_skill_path(self, skill: dict) -> str:

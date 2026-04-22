@@ -13,6 +13,7 @@ from skillclaw.config import SkillClawConfig
 from skillclaw.dashboard_ingest import build_dashboard_snapshot
 from skillclaw.dashboard_server import DashboardService, create_dashboard_app
 from skillclaw.dashboard_store import DashboardStore
+from skillclaw.skill_bundle import bundle_file_records, bundle_tree_sha256
 
 
 def _sha256_text(value: str) -> str:
@@ -39,8 +40,15 @@ def _skill_doc(name: str, description: str, body: str, *, category: str = "gener
     )
 
 
-def _history_entry(version: int, document: str, timestamp: str, action: str) -> dict[str, object]:
-    return {
+def _history_entry(
+    version: int,
+    document: str,
+    timestamp: str,
+    action: str,
+    *,
+    bundle_record: dict[str, object] | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
         "version": version,
         "content_sha": _sha256_text(document),
         "timestamp": timestamp,
@@ -48,6 +56,29 @@ def _history_entry(version: int, document: str, timestamp: str, action: str) -> 
         "skill_md": document,
         "content": document,
     }
+    if isinstance(bundle_record, dict):
+        payload.update(bundle_record)
+    return payload
+
+
+def _bundle_record(bundle_files: dict[str, bytes]) -> dict[str, object]:
+    return {
+        "format": "bundle_v1",
+        "entrypoint": "SKILL.md",
+        "tree_sha256": bundle_tree_sha256(bundle_files),
+        "files": bundle_file_records(bundle_files),
+    }
+
+
+def _write_storage_bundle(root: Path, bundle_files: dict[str, bytes]) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    for rel_path, data in bundle_files.items():
+        if rel_path == "SKILL.md":
+            path = root / "SKILL.md"
+        else:
+            path = root / "files" / Path(rel_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
 
 
 def _transcript_record(role: str, text: str) -> dict[str, object]:
@@ -285,10 +316,36 @@ class DashboardFixture:
         for path in (skills_dir, sessions_dir, validation_jobs_dir, validation_results_dir, validation_decisions_dir):
             path.mkdir(parents=True, exist_ok=True)
 
+        debug_v2_doc = _skill_doc(
+            "debug-notes",
+            "Keep a compact running log while debugging.",
+            "Capture the failing assumption and note what changed after each retry.",
+            category="coding",
+        )
+        debug_v2_bundle = {
+            "SKILL.md": debug_v2_doc.encode("utf-8"),
+            "references/guide.md": b"v2 debug guide\n",
+        }
+        debug_v3_bundle = {
+            "SKILL.md": self.shared_docs["debug-notes"].encode("utf-8"),
+            "references/checklist.md": b"v3 debug checklist\n",
+        }
+
         for name, document in self.shared_docs.items():
             skill_dir = skills_dir / name
             skill_dir.mkdir(parents=True, exist_ok=True)
             (skill_dir / "SKILL.md").write_text(document, encoding="utf-8")
+        _write_storage_bundle(skills_dir / "debug-notes", debug_v3_bundle)
+        _write_storage_bundle(skills_dir / "debug-notes" / "versions" / "v2", debug_v2_bundle)
+        _write_storage_bundle(skills_dir / "debug-notes" / "versions" / "v3", debug_v3_bundle)
+        (skills_dir / "debug-notes" / "versions" / "v2" / "bundle.json").write_text(
+            json.dumps(_bundle_record(debug_v2_bundle), indent=2),
+            encoding="utf-8",
+        )
+        (skills_dir / "debug-notes" / "versions" / "v3" / "bundle.json").write_text(
+            json.dumps(_bundle_record(debug_v3_bundle), indent=2),
+            encoding="utf-8",
+        )
 
         manifest = [
             {
@@ -296,6 +353,8 @@ class DashboardFixture:
                 "description": "Keep a compact running log while debugging.",
                 "category": "coding",
                 "sha256": _sha256_text(self.shared_docs["debug-notes"]),
+                "version": 3,
+                **_bundle_record(debug_v3_bundle),
                 "uploaded_by": "alice",
                 "uploaded_at": "2026-04-20T09:30:00Z",
             },
@@ -364,17 +423,20 @@ class DashboardFixture:
                     ),
                     _history_entry(
                         2,
-                        _skill_doc(
-                            "debug-notes",
-                            "Keep a compact running log while debugging.",
-                            "Capture the failing assumption and note what changed after each retry.",
-                            category="coding",
-                        ),
+                        debug_v2_doc,
                         "2026-04-19T08:15:00Z",
                         "improve",
+                        bundle_record=_bundle_record(debug_v2_bundle),
                     ),
-                    _history_entry(3, self.shared_docs["debug-notes"], "2026-04-20T09:30:00Z", "improve"),
+                    _history_entry(
+                        3,
+                        self.shared_docs["debug-notes"],
+                        "2026-04-20T09:30:00Z",
+                        "improve",
+                        bundle_record=_bundle_record(debug_v3_bundle),
+                    ),
                 ],
+                **_bundle_record(debug_v3_bundle),
             },
             "incident-timeline": {
                 "skill_id": _skill_id("incident-timeline"),
@@ -1339,6 +1401,22 @@ class DashboardApiTests(unittest.TestCase):
             debug_detail = detail_resp.json()
             self.assertEqual(debug_detail["name"], "debug-notes")
             debug_v2 = next(item for item in debug_detail["versions"] if int(item["version"]) == 2)
+            debug_v3 = next(item for item in debug_detail["versions"] if int(item["version"]) == 3)
+
+            activate_current_resp = client.post(
+                f"/api/v1/skills/{debug_skill['skill_id']}/activate",
+                json={"target": "shared-current"},
+            )
+            self.assertEqual(activate_current_resp.status_code, 200)
+            local_debug_dir = self.fixture.skills_dir / "debug-notes"
+            self.assertEqual(
+                (local_debug_dir / "SKILL.md").read_text(encoding="utf-8").strip(),
+                debug_v3["skill_md"].strip(),
+            )
+            self.assertTrue((local_debug_dir / "references" / "checklist.md").is_file())
+            self.assertFalse((local_debug_dir / "references" / "guide.md").exists())
+            synced_detail = client.get(f"/api/v1/skills/{debug_skill['skill_id']}").json()
+            self.assertEqual(synced_detail["local_tree_sha"], synced_detail["remote_tree_sha"])
 
             activate_resp = client.post(
                 f"/api/v1/skills/{debug_skill['skill_id']}/activate",
@@ -1346,8 +1424,10 @@ class DashboardApiTests(unittest.TestCase):
             )
             self.assertEqual(activate_resp.status_code, 200)
             self.assertEqual(activate_resp.json()["target"], "shared-version:2")
-            local_debug_path = self.fixture.skills_dir / "debug-notes" / "SKILL.md"
+            local_debug_path = local_debug_dir / "SKILL.md"
             self.assertEqual(local_debug_path.read_text(encoding="utf-8").strip(), debug_v2["skill_md"].strip())
+            self.assertTrue((local_debug_dir / "references" / "guide.md").is_file())
+            self.assertFalse((local_debug_dir / "references" / "checklist.md").exists())
 
             sessions_resp = client.get("/api/v1/sessions")
             self.assertEqual(sessions_resp.status_code, 200)

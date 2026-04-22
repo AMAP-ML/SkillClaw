@@ -16,9 +16,12 @@ from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from evolve_server.storage.oss_helpers import fetch_skill_bundle, fetch_version_bundle
+
 from .config import SkillClawConfig
 from .dashboard_ingest import build_dashboard_snapshot
 from .dashboard_store import DashboardStore
+from .skill_bundle import write_skill_bundle
 from .skill_hub import SkillHub
 
 logger = logging.getLogger(__name__)
@@ -116,6 +119,52 @@ class DashboardService:
             "summary": summary,
             "overview": self.store.get_overview(),
         }
+
+    def _skill_root_dir(self, skill: dict[str, Any], skill_name: str) -> Path:
+        local_path = Path(str(skill.get("local_path", "") or "")).expanduser()
+        if str(local_path).strip() and local_path.name == "SKILL.md":
+            return local_path.parent
+        return Path(self.config.skills_dir).expanduser() / skill_name
+
+    @staticmethod
+    def _bundle_record(payload: Any) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            return {}
+        files = payload.get("files")
+        if not isinstance(files, list):
+            files = []
+        return {
+            "format": str(payload.get("format") or "bundle_v1"),
+            "entrypoint": str(payload.get("entrypoint") or "SKILL.md"),
+            "tree_sha256": str(payload.get("tree_sha256") or ""),
+            "files": [dict(item) for item in files if isinstance(item, dict)],
+        }
+
+    @staticmethod
+    def _requires_full_bundle(record: dict[str, Any]) -> bool:
+        files = record.get("files")
+        return isinstance(files, list) and len(files) > 1
+
+    def _write_document_version(self, skill_root: Path, document: str) -> None:
+        skill_root.mkdir(parents=True, exist_ok=True)
+        (skill_root / "SKILL.md").write_text(document.rstrip() + "\n", encoding="utf-8")
+
+    def _activate_shared_bundle(
+        self,
+        skill_name: str,
+        skill_root: Path,
+        *,
+        version: int | None = None,
+        bundle_record: dict[str, Any],
+    ) -> None:
+        hub = _require_sharing_hub(self.config)
+        if version is None:
+            bundle_files = fetch_skill_bundle(hub._bucket, hub._prefix(), skill_name, bundle_record)
+        else:
+            bundle_files = fetch_version_bundle(hub._bucket, hub._prefix(), skill_name, version, bundle_record)
+        if not bundle_files:
+            raise ValueError("bundle snapshot is unavailable for the selected version")
+        write_skill_bundle(skill_root, bundle_files, clean=True)
 
     def _embedded_evolve_server(self):
         from evolve_server.core.config import EvolveServerConfig
@@ -266,13 +315,22 @@ class DashboardService:
         if not selected_target:
             raise ValueError("'target' is required")
 
+        skill_root = self._skill_root_dir(skill, skill_name)
         document = ""
         label = ""
+        activated_bundle = False
         if selected_target == "local-current":
             document = str(skill.get("skill_md") or skill.get("content") or "").strip()
             label = "本地当前版本"
+            self._write_document_version(skill_root, document)
         elif selected_target == "shared-current":
-            document = str(skill.get("remote_skill_md") or skill.get("remote_content") or "").strip()
+            bundle_record = self._bundle_record(skill.get("remote_bundle_record"))
+            if self._requires_full_bundle(bundle_record):
+                self._activate_shared_bundle(skill_name, skill_root, bundle_record=bundle_record)
+                activated_bundle = True
+            else:
+                document = str(skill.get("remote_skill_md") or skill.get("remote_content") or "").strip()
+                self._write_document_version(skill_root, document)
             label = "共享当前版本"
         elif selected_target.startswith("shared-version:"):
             raw_version = selected_target.split(":", 1)[1].strip()
@@ -291,19 +349,29 @@ class DashboardService:
             )
             if not isinstance(version_payload, dict):
                 raise ValueError(f"shared version not found: v{version_num}")
-            document = str(version_payload.get("skill_md") or version_payload.get("content") or "").strip()
+            version_bundle_record = self._bundle_record(version_payload.get("bundle_record"))
+            current_bundle_record = self._bundle_record(skill.get("remote_bundle_record"))
+            if self._requires_full_bundle(version_bundle_record):
+                self._activate_shared_bundle(
+                    skill_name,
+                    skill_root,
+                    version=version_num,
+                    bundle_record=version_bundle_record,
+                )
+                activated_bundle = True
+            else:
+                document = str(version_payload.get("skill_md") or version_payload.get("content") or "").strip()
+                if self._requires_full_bundle(current_bundle_record):
+                    raise ValueError(
+                        "selected version only has a SKILL.md snapshot; full bundle replay is unavailable"
+                    )
+                self._write_document_version(skill_root, document)
             label = f"共享 v{version_num}"
         else:
             raise ValueError(f"unsupported activation target: {selected_target}")
 
-        if not document:
+        if not activated_bundle and not document:
             raise ValueError("selected version does not include a document snapshot")
-
-        local_path = Path(str(skill.get("local_path", "") or "")).expanduser()
-        if not str(local_path).strip() or local_path.name != "SKILL.md":
-            local_path = Path(self.config.skills_dir).expanduser() / skill_name / "SKILL.md"
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        local_path.write_text(document.rstrip() + "\n", encoding="utf-8")
 
         sync_result = self.sync()
         return {
@@ -312,7 +380,7 @@ class DashboardService:
             "skill_name": skill_name,
             "target": selected_target,
             "label": label,
-            "local_path": str(local_path),
+            "local_path": str(skill_root / "SKILL.md"),
             "sync": sync_result["summary"],
         }
 

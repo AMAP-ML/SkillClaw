@@ -3,7 +3,7 @@ Workspace management for the agent engine under ``evolve_server``.
 
 Handles preparing the local workspace directory that OpenClaw operates on,
 snapshotting skill state before agent execution, and collecting changes
-(new / modified SKILL.md files) after the agent finishes.
+(new / modified skill bundles) after the agent finishes.
 
 Key design note on OpenClaw bootstrap integration:
   OpenClaw's ``ensureAgentWorkspace()`` creates template bootstrap files
@@ -15,12 +15,18 @@ Key design note on OpenClaw bootstrap integration:
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import shutil
 from pathlib import Path
 from typing import Any
+
+from skillclaw.skill_bundle import (
+    bundle_entrypoint_text,
+    bundle_tree_sha256,
+    read_skill_bundle,
+    write_skill_bundle,
+)
 
 from ..core.utils import parse_skill_content
 
@@ -56,6 +62,9 @@ workspace/
 ├── skills/            ← current skill library (read + write)
 │   └── <name>/
 │       ├── SKILL.md
+│       ├── references/
+│       ├── scripts/
+│       ├── assets/
 │       └── history/
 ├── manifest.json      ← skill manifest (read-only)
 └── skill_registry.json
@@ -65,7 +74,9 @@ workspace/
 
 - **All file operations** stay within this workspace directory.
 - Do NOT modify `sessions/`, `manifest.json`, or `skill_registry.json`.
-- Write changes only to `skills/<name>/SKILL.md` (and `history/`).
+- Write changes only inside `skills/<name>/` bundles.
+- You may inspect and edit `SKILL.md`, `references/`, `scripts/`, `assets/`,
+  `history/`, and other supporting files that belong to a skill.
 - If there are no actionable patterns, make no changes — that is fine.
 
 ## Memory
@@ -108,7 +119,7 @@ class AgentWorkspace:
     def prepare(
         self,
         sessions: list[dict],
-        existing_skills: dict[str, str],
+        existing_skills: dict[str, str | dict[str, bytes | bytearray | str]],
         manifest: dict[str, dict],
         agents_md: str,
         skill_registry_info: dict[str, Any] | None = None,
@@ -120,7 +131,8 @@ class AgentWorkspace:
         sessions:
             Raw session dicts drained from storage.
         existing_skills:
-            ``{skill_name: SKILL.md content}`` for all current skills.
+            ``{skill_name: bundle}`` for all current skills, where bundle is
+            either a raw ``SKILL.md`` string or ``{rel_path: bytes}``.
         manifest:
             Current manifest dict ``{skill_name: metadata}``.
         agents_md:
@@ -152,10 +164,15 @@ class AgentWorkspace:
 
         # Write existing skills
         self.skills_dir.mkdir(parents=True, exist_ok=True)
+        for path in sorted(self.skills_dir.iterdir()):
+            if path.is_dir() and path.name not in existing_skills:
+                shutil.rmtree(path)
         for name, content in existing_skills.items():
             skill_dir = self.skills_dir / name
-            skill_dir.mkdir(parents=True, exist_ok=True)
-            (skill_dir / "SKILL.md").write_text(content, encoding="utf-8")
+            if isinstance(content, dict):
+                write_skill_bundle(skill_dir, content, clean=True)
+            else:
+                write_skill_bundle(skill_dir, {"SKILL.md": content}, clean=True)
 
         # Write manifest
         manifest_path = self.root / "manifest.json"
@@ -209,17 +226,16 @@ class AgentWorkspace:
         )
 
     def snapshot_skills(self) -> dict[str, str]:
-        """Return ``{skill_name: sha256_of_content}`` for all skills in the workspace."""
+        """Return ``{skill_name: tree_sha256}`` for all skills in the workspace."""
         snapshot: dict[str, str] = {}
         if not self.skills_dir.exists():
             return snapshot
         for skill_dir in sorted(self.skills_dir.iterdir()):
             if not skill_dir.is_dir():
                 continue
-            skill_md = skill_dir / "SKILL.md"
-            if skill_md.is_file():
-                content = skill_md.read_bytes()
-                snapshot[skill_dir.name] = hashlib.sha256(content).hexdigest()
+            bundle = read_skill_bundle(skill_dir)
+            if "SKILL.md" in bundle:
+                snapshot[skill_dir.name] = bundle_tree_sha256(bundle)
         return snapshot
 
     def collect_changes(
@@ -233,6 +249,8 @@ class AgentWorkspace:
         - ``action``: ``"create"`` or ``"improve"``
         - ``skill``: parsed skill dict (name, description, content, ...)
         - ``raw_md``: the raw SKILL.md text
+        - ``bundle_files``: full bundle contents ``{rel_path: bytes}``
+        - ``tree_sha256``: directory-level fingerprint
         """
         after_snapshot = self.snapshot_skills()
         changes: list[dict[str, Any]] = []
@@ -242,8 +260,15 @@ class AgentWorkspace:
             if before_sha == after_sha:
                 continue
 
-            skill_md_path = self.skills_dir / name / "SKILL.md"
-            raw_md = skill_md_path.read_text(encoding="utf-8")
+            bundle_files = read_skill_bundle(self.skills_dir / name)
+            if "SKILL.md" not in bundle_files:
+                logger.warning(
+                    "[AgentWorkspace] changed skill '%s' is missing SKILL.md; skipping",
+                    name,
+                )
+                continue
+
+            raw_md = bundle_entrypoint_text(bundle_files)
             parsed = parse_skill_content(name, raw_md)
 
             action = "create" if before_sha is None else "improve"
@@ -253,6 +278,8 @@ class AgentWorkspace:
                     "action": action,
                     "skill": parsed,
                     "raw_md": raw_md,
+                    "bundle_files": bundle_files,
+                    "tree_sha256": after_sha,
                 }
             )
             logger.info(

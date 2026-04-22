@@ -129,7 +129,10 @@ _SKILL_WRITE_TOOL_NAMES = {
 _HERMES_SKILL_WRITE_TOOL_NAMES = {"skill_manage"}
 _SHELL_TOOL_NAMES = {"shell", "exec", "bash", "terminal"}
 _PATCH_PATH_RE = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", re.MULTILINE)
-_SHELL_SKILL_PATH_RE = re.compile(r"([~./A-Za-z0-9_\-][^\n\"'`]*?SKILL\.md)")
+_SHELL_SKILL_PATH_RE = re.compile(
+    r"([~./A-Za-z0-9_\-][^\n\"'`]*?"
+    r"(?:SKILL\.md|references/[^\s\"'`]+|scripts/[^\s\"'`]+|assets/[^\s\"'`]+|history/[^\s\"'`]+))"
+)
 
 
 def _extract_skill_names(items: list[Any] | None) -> set[str]:
@@ -242,12 +245,24 @@ def _deduplicate_paths(paths: list[str]) -> list[str]:
     return out
 
 
+def _looks_like_path(value: str) -> bool:
+    text = str(value or "").strip()
+    if not text or text in {".", ".."}:
+        return False
+    return (
+        "/" in text
+        or "\\" in text
+        or text.startswith("~")
+        or text.endswith("SKILL.md")
+    )
+
+
 def _extract_skill_paths_from_patch(raw_text: str) -> list[str]:
     return _deduplicate_paths(
         [
             match.group(1).strip()
             for match in _PATCH_PATH_RE.finditer(str(raw_text or ""))
-            if match.group(1).strip().endswith("SKILL.md")
+            if match.group(1).strip()
         ]
     )
 
@@ -257,7 +272,7 @@ def _extract_skill_paths_from_shell(command: str) -> list[str]:
         [
             match.group(1).strip()
             for match in _SHELL_SKILL_PATH_RE.finditer(str(command or ""))
-            if match.group(1).strip().endswith("SKILL.md")
+            if match.group(1).strip()
         ]
     )
 
@@ -278,13 +293,13 @@ def _extract_skill_paths_from_args_dict(args: dict[str, Any]) -> list[str]:
         "new_path",
     ):
         value = args.get(key)
-        if isinstance(value, str) and value.strip().endswith("SKILL.md"):
+        if isinstance(value, str) and _looks_like_path(value):
             paths.append(value.strip())
 
     raw_paths = args.get("paths")
     if isinstance(raw_paths, list):
         for item in raw_paths:
-            if isinstance(item, str) and item.strip().endswith("SKILL.md"):
+            if isinstance(item, str) and _looks_like_path(item):
                 paths.append(item.strip())
     return _deduplicate_paths(paths)
 
@@ -320,8 +335,8 @@ def _extract_skill_paths_from_tool_call(tool_call: dict) -> tuple[str, list[str]
     return tool_name, _deduplicate_paths(paths)
 
 
-def _extract_hermes_skill_name_from_tool_call(tool_call: dict) -> tuple[str, str]:
-    """Extract Hermes-native skill names from skill_view / skill_manage calls."""
+def _extract_hermes_skill_name_from_tool_call(tool_call: dict) -> tuple[str, str, str]:
+    """Extract Hermes-native skill name + relative file path from skill calls."""
     func = tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
     tool_name = _normalize_tool_call_name(func.get("name") or "")
     args_raw = func.get("arguments", "{}")
@@ -337,13 +352,19 @@ def _extract_hermes_skill_name_from_tool_call(tool_call: dict) -> tuple[str, str
         args_obj = {}
 
     if not isinstance(args_obj, dict):
-        return tool_name, ""
+        return tool_name, "", ""
 
+    rel_path = ""
+    for key in ("file_path", "path"):
+        value = args_obj.get(key)
+        if isinstance(value, str) and value.strip():
+            rel_path = value.strip()
+            break
     for key in ("skill_name", "name", "skill"):
         value = args_obj.get(key)
         if isinstance(value, str) and value.strip():
-            return tool_name, value.strip()
-    return tool_name, ""
+            return tool_name, value.strip(), rel_path
+    return tool_name, "", rel_path
 
 
 def _resolve_skill_reference(
@@ -363,7 +384,7 @@ def _resolve_skill_reference(
         }
     return {
         "skill_id": "",
-        "skill_name": os.path.basename(os.path.dirname(expanded or str(path or "").strip())),
+        "skill_name": "",
         "path": str(path or "").strip(),
     }
 
@@ -371,10 +392,24 @@ def _resolve_skill_reference(
 def _resolve_skill_reference_by_name(
     skill_name: str,
     skill_path_map: dict[str, dict[str, str]],
+    rel_path: str = "",
 ) -> dict[str, str]:
     clean_name = str(skill_name or "").strip()
     if not clean_name:
         return {"skill_id": "", "skill_name": "", "path": ""}
+    normalized_rel = str(rel_path or "").strip().replace("\\", "/").lstrip("./")
+    if normalized_rel:
+        suffix = f"/{normalized_rel}"
+        for path, skill_info in skill_path_map.items():
+            if str(skill_info.get("skill_name", "") or "").strip() != clean_name:
+                continue
+            candidate = str(path or "").replace("\\", "/")
+            if candidate.endswith(suffix) or candidate == normalized_rel:
+                return {
+                    "skill_id": str(skill_info.get("skill_id", "") or ""),
+                    "skill_name": clean_name,
+                    "path": str(path or ""),
+                }
     for path, skill_info in skill_path_map.items():
         if str(skill_info.get("skill_name", "") or "").strip() == clean_name:
             return {
@@ -825,10 +860,10 @@ def _extract_read_skills_from_tool_calls(
     tool_calls: list[dict],
     skill_path_map: dict[str, dict[str, str]],
 ) -> list[dict]:
-    """Identify which SKILL.md files were read from the model's tool_calls.
+    """Identify which skill bundle files were read from the model's tool_calls.
 
     Returns a list of ``{"skill_id": ..., "skill_name": ...}`` dicts for
-    each ``read`` tool call whose ``path`` argument points to a SKILL.md.
+    each ``read`` tool call whose ``path`` argument points inside a skill.
     """
     read_skills: list[dict] = []
     seen_ids: set[str] = set()
@@ -836,8 +871,8 @@ def _extract_read_skills_from_tool_calls(
         tool_name, skill_paths = _extract_skill_paths_from_tool_call(tc)
         normalized = tool_name.lower()
         if normalized in _HERMES_SKILL_READ_TOOL_NAMES:
-            _, skill_name = _extract_hermes_skill_name_from_tool_call(tc)
-            skill_ref = _resolve_skill_reference_by_name(skill_name, skill_path_map)
+            _, skill_name, rel_path = _extract_hermes_skill_name_from_tool_call(tc)
+            skill_ref = _resolve_skill_reference_by_name(skill_name, skill_path_map, rel_path)
             dedupe_key = skill_ref.get("skill_id") or skill_ref.get("skill_name")
             if dedupe_key and dedupe_key not in seen_ids:
                 read_skills.append(skill_ref)
@@ -847,6 +882,8 @@ def _extract_read_skills_from_tool_calls(
             continue
         for path in skill_paths:
             skill_ref = _resolve_skill_reference(path, skill_path_map)
+            if not skill_ref.get("skill_id") and not skill_ref.get("skill_name"):
+                continue
             dedupe_key = skill_ref.get("skill_id") or skill_ref.get("path") or skill_ref.get("skill_name")
             if not dedupe_key or dedupe_key in seen_ids:
                 continue
@@ -860,7 +897,7 @@ def _extract_modified_skills_from_tool_calls(
     tool_calls: list[dict],
     skill_path_map: dict[str, dict[str, str]],
 ) -> list[dict]:
-    """Identify SKILL.md files the model attempted to write or update."""
+    """Identify skill bundle files the model attempted to write or update."""
     modified_skills: list[dict] = []
     seen_ids: set[str] = set()
     for tc in tool_calls:
@@ -869,8 +906,8 @@ def _extract_modified_skills_from_tool_calls(
         if normalized in _READ_TOOL_NAMES:
             continue
         if normalized in _HERMES_SKILL_WRITE_TOOL_NAMES:
-            _, skill_name = _extract_hermes_skill_name_from_tool_call(tc)
-            skill_ref = _resolve_skill_reference_by_name(skill_name, skill_path_map)
+            _, skill_name, rel_path = _extract_hermes_skill_name_from_tool_call(tc)
+            skill_ref = _resolve_skill_reference_by_name(skill_name, skill_path_map, rel_path)
             dedupe_key = skill_ref.get("skill_id") or skill_ref.get("skill_name")
             if dedupe_key and dedupe_key not in seen_ids:
                 modified_skills.append({**skill_ref, "action": normalized})
@@ -880,6 +917,8 @@ def _extract_modified_skills_from_tool_calls(
             continue
         for path in skill_paths:
             skill_ref = _resolve_skill_reference(path, skill_path_map)
+            if not skill_ref.get("skill_id") and not skill_ref.get("skill_name"):
+                continue
             dedupe_key = skill_ref.get("skill_id") or skill_ref.get("path") or skill_ref.get("skill_name")
             if not dedupe_key or dedupe_key in seen_ids:
                 continue

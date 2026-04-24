@@ -343,6 +343,7 @@ class SetupWizard:
         proxy_config["port"] = proxy_port
         proxy_config.setdefault("host", "0.0.0.0")
         proxy_config["served_model_name"] = served_model_name or "skillclaw-model"
+        llm_api_mode = str(current_llm.get("api_mode", "chat") or "chat")
         data = {
             "claw_type": claw_type,
             "llm": {
@@ -351,6 +352,7 @@ class SetupWizard:
                 "api_base": api_base,
                 "api_key": api_key,
                 "bedrock_region": bedrock_region,
+                "api_mode": llm_api_mode,
             },
             "openrouter": openrouter_config,
             "proxy": proxy_config,

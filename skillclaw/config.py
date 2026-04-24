@@ -62,6 +62,9 @@ class SkillClawConfig:
     llm_api_base: str = ""
     llm_api_key: str = ""
     llm_model_id: str = ""
+    # Upstream API surface: "chat" keeps the legacy chat-completions bridge;
+    # "responses" forwards Codex /v1/responses payloads to an upstream Responses API.
+    llm_api_mode: str = "chat"
 
     # ------------------------------------------------------------------ #
     # OpenRouter-specific (ignored for other providers)                    #

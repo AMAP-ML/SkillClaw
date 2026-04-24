@@ -251,6 +251,7 @@ class ConfigStore:
         llm_api_base = llm.get("api_base", "")
         llm_api_key = llm.get("api_key", "")
         llm_model_id = llm.get("model_id", "")
+        llm_api_mode = str(llm.get("api_mode", "chat") or "chat")
         proxy = data.get("proxy", {})
         skills = data.get("skills", {})
         orouter = data.get("openrouter", {})
@@ -288,6 +289,7 @@ class ConfigStore:
             llm_api_base=llm_api_base,
             llm_api_key=llm_api_key,
             llm_model_id=llm_model_id,
+            llm_api_mode=llm_api_mode,
             bedrock_region=llm.get("bedrock_region") or data.get("bedrock_region", "us-east-1"),
             # OpenRouter
             openrouter_app_name=orouter.get("app_name", "SkillClaw"),

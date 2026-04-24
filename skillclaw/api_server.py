@@ -30,6 +30,8 @@ from .data_formatter import ConversationSample
 from .prm_scorer import PRMScorer
 from .skill_manager import SkillManager
 from .utils import run_llm
+from .protocols import anthropic_messages as anthropic_protocol
+from .protocols import openai_responses as responses_protocol
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +90,7 @@ def _normalize_assistant_content_parts(content: list[dict]) -> tuple[str, list[d
                 }
             )
     return (" ".join(text_parts).strip(), tool_calls)
+
 
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
@@ -1058,324 +1061,39 @@ def _rewrite_new_session_bootstrap_prompt(messages: list[dict]) -> tuple[list[di
 
 
 # ------------------------------------------------------------------ #
-# Anthropic ↔ OpenAI format helpers (for NanoClaw /v1/messages)      #
+# Protocol compatibility wrappers                                      #
 # ------------------------------------------------------------------ #
 
 
 def _anthropic_to_openai_body(body: dict[str, Any]) -> dict[str, Any]:
-    """Convert an Anthropic /v1/messages request body to OpenAI chat format."""
-    messages: list[dict] = list(body.get("messages", []))
-
-    # Anthropic puts the system prompt at top level; move it into messages[0].
-    system = body.get("system")
-    if system:
-        if isinstance(system, str):
-            system_text = system
-        elif isinstance(system, list):
-            system_text = " ".join(
-                blk.get("text", "") for blk in system if isinstance(blk, dict) and blk.get("type") == "text"
-            )
-        else:
-            system_text = str(system)
-        messages = [{"role": "system", "content": system_text}] + messages
-
-    # Flatten Anthropic content blocks → plain strings expected by OpenAI.
-    normalized: list[dict] = []
-    for msg in messages:
-        content = msg.get("content")
-        if isinstance(content, list):
-            text = " ".join(
-                blk.get("text", "") for blk in content if isinstance(blk, dict) and blk.get("type") == "text"
-            )
-            normalized.append({**msg, "content": text})
-        else:
-            normalized.append(msg)
-
-    openai_body: dict[str, Any] = {
-        "model": body.get("model", ""),
-        "messages": normalized,
-        "max_tokens": body.get("max_tokens", 2048),
-    }
-    for opt in ("temperature", "top_p", "stop_sequences", "stream"):
-        if opt in body:
-            key = "stop" if opt == "stop_sequences" else opt
-            openai_body[key] = body[opt]
-    return openai_body
+    return anthropic_protocol.to_openai_body(body)
 
 
 def _normalize_responses_content(content: Any) -> str:
-    """Flatten Responses-style content blocks to plain text."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if not isinstance(item, dict):
-                continue
-            item_type = item.get("type")
-            if item_type in {"input_text", "output_text", "text"}:
-                text = item.get("text")
-                if isinstance(text, str) and text:
-                    parts.append(text)
-        return " ".join(parts)
-    return str(content) if content is not None else ""
+    return responses_protocol.normalize_content_to_text(content)
 
 
 def _responses_tools_to_openai_tools(tools: Any) -> list[dict]:
-    """Convert Responses function-tool schemas to chat-completions tool schemas."""
-    converted: list[dict] = []
-    if not isinstance(tools, list):
-        return converted
-
-    for item in tools:
-        if not isinstance(item, dict):
-            continue
-        item_type = item.get("type")
-        if item_type == "function":
-            name = str(item.get("name") or "").strip()
-            if not name:
-                continue
-            converted.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": name,
-                        "description": str(item.get("description") or ""),
-                        "parameters": item.get("parameters") or {"type": "object", "properties": {}},
-                    },
-                }
-            )
-            continue
-        if item_type == "function" or item.get("function"):
-            converted.append(item)
-    return converted
+    return responses_protocol.tools_to_openai_tools(tools)
 
 
 def _responses_to_openai_body(body: dict[str, Any], default_model: str) -> dict[str, Any]:
-    """Convert an OpenAI Responses request body to chat-completions format."""
-    raw_input = body.get("input")
-    if raw_input is None:
-        raise HTTPException(status_code=400, detail="input is required")
-
-    messages: list[dict] = []
-    instructions = body.get("instructions")
-    if instructions is not None:
-        messages.append({"role": "system", "content": _normalize_responses_content(instructions)})
-
-    def _append_tool_call(item: dict[str, Any]) -> None:
-        call_id = str(item.get("call_id") or item.get("id") or "").strip()
-        name = str(item.get("name") or "").strip()
-        arguments = item.get("arguments", "{}")
-        if isinstance(arguments, dict):
-            arguments = json.dumps(arguments, ensure_ascii=False)
-        elif not isinstance(arguments, str):
-            arguments = str(arguments)
-        arguments = arguments.strip() or "{}"
-        if not call_id or not name:
-            raise HTTPException(status_code=400, detail="function_call items require call_id and name")
-        messages.append(
-            {
-                "role": "assistant",
-                "content": "",
-                "tool_calls": [
-                    {
-                        "id": call_id,
-                        "type": "function",
-                        "function": {"name": name, "arguments": arguments},
-                    }
-                ],
-            }
-        )
-
-    def _append_tool_output(item: dict[str, Any]) -> None:
-        call_id = str(item.get("call_id") or item.get("tool_call_id") or "").strip()
-        if not call_id:
-            raise HTTPException(status_code=400, detail="function_call_output items require call_id")
-        output = item.get("output", "")
-        if output is None:
-            output = ""
-        if not isinstance(output, str):
-            output = str(output)
-        messages.append({"role": "tool", "tool_call_id": call_id, "content": output})
-
-    if isinstance(raw_input, str):
-        messages.append({"role": "user", "content": raw_input})
-    elif isinstance(raw_input, list):
-        for item in raw_input:
-            if isinstance(item, str):
-                messages.append({"role": "user", "content": item})
-                continue
-            if not isinstance(item, dict):
-                raise HTTPException(status_code=400, detail="input items must be strings or objects")
-
-            item_type = item.get("type")
-            if item_type == "function_call":
-                _append_tool_call(item)
-                continue
-            if item_type == "function_call_output":
-                _append_tool_output(item)
-                continue
-            if item_type == "reasoning":
-                continue
-
-            role = str(item.get("role") or "user").strip() or "user"
-            if role == "tool":
-                _append_tool_output(item)
-                continue
-            messages.append({"role": role, "content": _normalize_responses_content(item.get("content", ""))})
-    else:
-        raise HTTPException(status_code=400, detail="input must be a string or an array")
-
-    if not messages:
-        raise HTTPException(status_code=400, detail="input must produce at least one message")
-
-    openai_body: dict[str, Any] = {
-        "model": body.get("model") or default_model,
-        "messages": messages,
-    }
-    tools = _responses_tools_to_openai_tools(body.get("tools"))
-    if tools:
-        openai_body["tools"] = tools
-    if "temperature" in body:
-        openai_body["temperature"] = body["temperature"]
-    if "top_p" in body:
-        openai_body["top_p"] = body["top_p"]
-    if "tool_choice" in body:
-        openai_body["tool_choice"] = body["tool_choice"]
-    if "parallel_tool_calls" in body:
-        openai_body["parallel_tool_calls"] = body["parallel_tool_calls"]
-    if "max_output_tokens" in body:
-        openai_body["max_tokens"] = body["max_output_tokens"]
-    return openai_body
+    try:
+        return responses_protocol.to_openai_body(body, default_model)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def _responses_function_item_id(call_id: str, index: int) -> str:
-    raw = str(call_id or "").strip()
-    if raw.startswith("fc_"):
-        return raw
-    if raw.startswith("call_") and len(raw) > len("call_"):
-        return f"fc_{raw[len('call_') :]}"
-    cleaned = re.sub(r"[^A-Za-z0-9_-]", "", raw)
-    if cleaned:
-        return f"fc_{cleaned[:48]}"
-    return f"fc_{index}"
+    return responses_protocol.function_item_id(call_id, index)
 
 
 def _openai_chat_to_responses_payload(payload: dict[str, Any], model: str) -> dict[str, Any]:
-    """Convert a chat-completions payload to a Responses API payload."""
-    choice = payload.get("choices", [{}])[0]
-    message = choice.get("message", {}) if isinstance(choice.get("message"), dict) else {}
-    content_text = _flatten_message_content(message.get("content", ""))
-    tool_calls = list(message.get("tool_calls") or []) if isinstance(message.get("tool_calls"), list) else []
-
-    output_items: list[dict[str, Any]] = []
-    for idx, tc in enumerate(tool_calls):
-        if not isinstance(tc, dict):
-            continue
-        fn = tc.get("function", {}) if isinstance(tc.get("function"), dict) else {}
-        call_id = str(tc.get("id") or tc.get("call_id") or f"call_{idx}").strip() or f"call_{idx}"
-        arguments = fn.get("arguments", "{}")
-        if isinstance(arguments, dict):
-            arguments = json.dumps(arguments, ensure_ascii=False)
-        elif not isinstance(arguments, str):
-            arguments = str(arguments)
-        output_items.append(
-            {
-                "type": "function_call",
-                "id": _responses_function_item_id(call_id, idx),
-                "call_id": call_id,
-                "name": str(fn.get("name") or ""),
-                "arguments": arguments or "{}",
-                "status": "completed",
-            }
-        )
-
-    if content_text or not output_items:
-        output_items.append(
-            {
-                "id": f"msg_{payload.get('id') or 'skillclaw'}_{len(output_items)}",
-                "type": "message",
-                "role": "assistant",
-                "status": "completed",
-                "content": [{"type": "output_text", "text": content_text, "annotations": []}],
-            }
-        )
-
-    usage = payload.get("usage", {})
-    response_payload = {
-        "id": payload.get("id") or f"resp_skillclaw_{int(time.time() * 1000)}",
-        "object": "response",
-        "created_at": payload.get("created", int(time.time())),
-        "status": "completed",
-        "model": model,
-        "output": output_items,
-        "parallel_tool_calls": True,
-        "tool_choice": "auto",
-        "tools": [],
-        "usage": {
-            "input_tokens": int(usage.get("prompt_tokens", 0) or 0),
-            "output_tokens": int(usage.get("completion_tokens", 0) or 0),
-            "total_tokens": int(usage.get("total_tokens", 0) or 0),
-        },
-    }
-    if content_text:
-        response_payload["output_text"] = content_text
-    return response_payload
-
-
-def _merge_previous_response_messages(
-    previous_messages: list[dict[str, Any]],
-    current_messages: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Merge stored response history with the current turn's messages.
-
-    If the current request provides a fresh system/instructions message, keep it
-    as the new leading system prompt and drop older system prompts from history.
-    """
-    if not previous_messages:
-        return list(current_messages)
-    if not current_messages:
-        return list(previous_messages)
-
-    first = current_messages[0]
-    if isinstance(first, dict) and first.get("role") == "system":
-        history_without_system = [
-            msg for msg in previous_messages if not (isinstance(msg, dict) and msg.get("role") == "system")
-        ]
-        return [first, *history_without_system, *current_messages[1:]]
-
-    return [*previous_messages, *current_messages]
+    return responses_protocol.from_openai_chat_payload(payload, model)
 
 
 def _openai_to_anthropic_response(openai_resp: dict[str, Any], model: str) -> dict[str, Any]:
-    """Convert an OpenAI chat completion response to Anthropic /v1/messages format."""
-    choice = openai_resp.get("choices", [{}])[0]
-    message = choice.get("message", {})
-    content_text = message.get("content") or ""
-    finish_reason = choice.get("finish_reason", "stop")
-
-    stop_reason_map = {
-        "stop": "end_turn",
-        "length": "max_tokens",
-        "tool_calls": "tool_use",
-        "content_filter": "stop_sequence",
-    }
-    stop_reason = stop_reason_map.get(finish_reason, "end_turn")
-
-    usage = openai_resp.get("usage", {})
-    return {
-        "id": openai_resp.get("id", "msg_skillclaw"),
-        "type": "message",
-        "role": "assistant",
-        "model": model,
-        "content": [{"type": "text", "text": content_text}],
-        "stop_reason": stop_reason,
-        "stop_sequence": None,
-        "usage": {
-            "input_tokens": usage.get("prompt_tokens", 0),
-            "output_tokens": usage.get("completion_tokens", 0),
-        },
-    }
+    return anthropic_protocol.from_openai_response(openai_resp, model)
 
 
 # ------------------------------------------------------------------ #
@@ -1596,6 +1314,7 @@ class SkillClawAPIServer:
             request: Request,
             authorization: Optional[str] = Header(default=None),
             x_session_id: Optional[str] = Header(default=None),
+            codex_session_id: Optional[str] = Header(default=None, alias="session_id"),
             x_turn_type: Optional[str] = Header(default=None),
             x_session_done: Optional[str] = Header(default=None),
         ):
@@ -1604,6 +1323,15 @@ class SkillClawAPIServer:
             await owner._check_auth(authorization)
 
             body = await request.json()
+            if owner._responses_native_enabled():
+                if bool(body.get("stream", False)):
+                    return StreamingResponse(
+                        owner._stream_llm_responses(body),
+                        media_type="text/event-stream",
+                    )
+                response_payload = await owner._forward_to_llm_responses(body)
+                return JSONResponse(content=response_payload)
+
             previous_response_id = str(body.get("previous_response_id") or "").strip()
             store_response = bool(body.get("store", True))
             openai_body = _responses_to_openai_body(body, owner._served_model)
@@ -1618,7 +1346,7 @@ class SkillClawAPIServer:
                     list(stored.get("messages") or []),
                     list(openai_body.get("messages") or []),
                 )
-            _raw_sid = x_session_id or body.get("session_id") or ""
+            _raw_sid = x_session_id or codex_session_id or body.get("session_id") or ""
             if _raw_sid:
                 session_id = _raw_sid
                 turn_type = _resolve_turn_type(x_turn_type, body.get("turn_type"), default="main")
@@ -2505,6 +2233,100 @@ class SkillClawAPIServer:
             return await self._forward_to_llm_bedrock(body)
         return await self._forward_to_llm_openai(body)
 
+    def _responses_native_enabled(self) -> bool:
+        """Return whether /v1/responses should be forwarded as Responses API."""
+        return str(getattr(self.config, "llm_api_mode", "chat") or "chat").lower() == "responses"
+
+    def _prepare_responses_forward(self, body: dict[str, Any], *, stream: bool) -> tuple[str, dict[str, Any], dict[str, str]]:
+        """Build URL, body, and headers for native Responses forwarding.
+
+        Native mode intentionally keeps Responses-only tools (custom, web_search,
+        namespace, etc.) untouched instead of converting the request to chat.
+        """
+        api_base = self.config.llm_api_base.rstrip("/")
+        if not api_base:
+            raise HTTPException(
+                status_code=503,
+                detail="llm_api_base is not configured. Run 'skillclaw setup' first.",
+            )
+
+        send_body = {k: v for k, v in body.items() if k not in _NON_STANDARD_BODY_KEYS}
+        send_body["model"] = self.config.llm_model_id or body.get("model", "")
+        send_body["stream"] = stream
+
+        headers: dict[str, str] = {}
+        if self.config.llm_api_key:
+            headers["Authorization"] = f"Bearer {self.config.llm_api_key}"
+        return f"{api_base}/responses", send_body, headers
+
+    async def _forward_to_llm_responses(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Forward a Codex Responses payload to an upstream Responses API."""
+        import httpx
+
+        url, send_body, headers = self._prepare_responses_forward(body, stream=False)
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=_llm_request_timeout_seconds()) as client:
+                    resp = await client.post(
+                        url,
+                        json=send_body,
+                        headers=headers,
+                    )
+                    resp.raise_for_status()
+                    return resp.json()
+            except httpx.HTTPStatusError as e:
+                response_text = e.response.text[:200]
+                if attempt < max_retries - 1:
+                    wait = min(2**attempt + random.uniform(0, 1), 10)
+                    logger.warning(
+                        "[OpenClaw] upstream Responses error (attempt %d/%d), retrying in %.1fs: %s %s",
+                        attempt + 1,
+                        max_retries,
+                        wait,
+                        e.response.status_code,
+                        response_text,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                logger.error("[OpenClaw] upstream Responses error: %s %s", e.response.status_code, response_text)
+                raise HTTPException(status_code=502, detail=f"Upstream Responses error: {e}") from e
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait = min(2**attempt + random.uniform(0, 1), 10)
+                    logger.warning(
+                        "[OpenClaw] Responses forward failed (attempt %d/%d), retrying in %.1fs: %s",
+                        attempt + 1,
+                        max_retries,
+                        wait,
+                        e,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                logger.error("[OpenClaw] Responses forward failed: %s", e, exc_info=True)
+                raise HTTPException(status_code=502, detail=f"Responses forward error: {e}") from e
+
+    async def _stream_llm_responses(self, body: dict[str, Any]):
+        """Passthrough upstream Responses SSE without aggregating or rewriting events."""
+        import httpx
+
+        url, send_body, headers = self._prepare_responses_forward(body, stream=True)
+        try:
+            async with httpx.AsyncClient(timeout=_llm_request_timeout_seconds()) as client:
+                async with client.stream("POST", url, json=send_body, headers=headers) as resp:
+                    resp.raise_for_status()
+                    async for chunk in resp.aiter_raw():
+                        if chunk:
+                            yield chunk
+        except httpx.HTTPStatusError as e:
+            response_text = e.response.text[:200]
+            logger.error("[OpenClaw] upstream Responses stream error: %s %s", e.response.status_code, response_text)
+            raise HTTPException(status_code=502, detail=f"Upstream Responses stream error: {e}") from e
+        except Exception as e:
+            logger.error("[OpenClaw] Responses stream failed: %s", e, exc_info=True)
+            raise HTTPException(status_code=502, detail=f"Responses stream error: {e}") from e
+
     async def _forward_to_llm_openai(self, body: dict[str, Any]) -> dict[str, Any]:
         """Forward to an OpenAI-compatible API."""
         import httpx
@@ -3053,178 +2875,14 @@ class SkillClawAPIServer:
 
     async def _stream_responses_response(self, response_payload: dict[str, Any]):
         """Yield OpenAI Responses API-compatible SSE events."""
-        seq = 0
-
-        def _event(payload: dict[str, Any]) -> str:
-            nonlocal seq
-            payload["sequence_number"] = seq
-            seq += 1
-            return "data: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
-
-        initial_response = dict(response_payload)
-        initial_response["status"] = "in_progress"
-        initial_response["output"] = []
-        initial_response["usage"] = None
-        yield _event({"type": "response.created", "response": initial_response})
-        yield _event({"type": "response.in_progress", "response": initial_response})
-
-        for index, item in enumerate(response_payload.get("output", [])):
-            yield _event(
-                {
-                    "type": "response.output_item.added",
-                    "output_index": index,
-                    "item": item,
-                }
-            )
-
-            if item.get("type") == "function_call":
-                arguments = str(item.get("arguments") or "")
-                if arguments:
-                    yield _event(
-                        {
-                            "type": "response.function_call_arguments.delta",
-                            "item_id": item.get("id", ""),
-                            "output_index": index,
-                            "delta": arguments,
-                        }
-                    )
-                yield _event(
-                    {
-                        "type": "response.function_call_arguments.done",
-                        "item_id": item.get("id", ""),
-                        "output_index": index,
-                        "arguments": arguments,
-                    }
-                )
-
-            if item.get("type") == "message":
-                for content_index, part in enumerate(item.get("content", [])):
-                    if part.get("type") != "output_text":
-                        continue
-                    item_id = str(item.get("id") or "")
-                    base_part = {
-                        "type": "output_text",
-                        "text": "",
-                        "annotations": [],
-                    }
-                    yield _event(
-                        {
-                            "type": "response.content_part.added",
-                            "output_index": index,
-                            "content_index": content_index,
-                            "item_id": item_id,
-                            "part": base_part,
-                        }
-                    )
-                    text = str(part.get("text") or "")
-                    if text:
-                        yield _event(
-                            {
-                                "type": "response.output_text.delta",
-                                "output_index": index,
-                                "content_index": content_index,
-                                "item_id": item_id,
-                                "delta": text,
-                                "logprobs": [],
-                            }
-                        )
-                    yield _event(
-                        {
-                            "type": "response.output_text.done",
-                            "output_index": index,
-                            "content_index": content_index,
-                            "item_id": item_id,
-                            "text": text,
-                            "logprobs": [],
-                        }
-                    )
-                    yield _event(
-                        {
-                            "type": "response.content_part.done",
-                            "output_index": index,
-                            "content_index": content_index,
-                            "item_id": item_id,
-                            "part": {
-                                "type": "output_text",
-                                "text": text,
-                                "annotations": [],
-                            },
-                        }
-                    )
-            yield _event(
-                {
-                    "type": "response.output_item.done",
-                    "output_index": index,
-                    "item": item,
-                }
-            )
-
-        yield _event({"type": "response.completed", "response": response_payload})
-        yield "data: [DONE]\n\n"
+        async for chunk in responses_protocol.stream_response(response_payload):
+            yield chunk
 
     async def _stream_anthropic_response(self, result: dict[str, Any], model: str):
         """Yield Anthropic-format SSE events from an internal result dict."""
-        payload = result["response"]
-        choice = payload.get("choices", [{}])[0]
-        message = choice.get("message", {})
-        content_text = message.get("content", "") or ""
-        finish_reason = choice.get("finish_reason", "stop")
-        stop_reason_map = {
-            "stop": "end_turn",
-            "length": "max_tokens",
-            "tool_calls": "tool_use",
-            "content_filter": "stop_sequence",
-        }
-        stop_reason = stop_reason_map.get(finish_reason, "end_turn")
-        usage = payload.get("usage", {})
-        msg_id = payload.get("id", "msg_skillclaw")
+        async for chunk in anthropic_protocol.stream_from_openai_result(result, model):
+            yield chunk
 
-        def _sse(event: str, data: dict) -> str:
-            return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-        yield _sse(
-            "message_start",
-            {
-                "type": "message_start",
-                "message": {
-                    "id": msg_id,
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [],
-                    "model": model,
-                    "stop_reason": None,
-                    "stop_sequence": None,
-                    "usage": {"input_tokens": usage.get("prompt_tokens", 0), "output_tokens": 0},
-                },
-            },
-        )
-        yield _sse(
-            "content_block_start",
-            {
-                "type": "content_block_start",
-                "index": 0,
-                "content_block": {"type": "text", "text": ""},
-            },
-        )
-        yield _sse("ping", {"type": "ping"})
-        yield _sse(
-            "content_block_delta",
-            {
-                "type": "content_block_delta",
-                "index": 0,
-                "delta": {"type": "text_delta", "text": content_text},
-            },
-        )
-        yield _sse("content_block_stop", {"type": "content_block_stop", "index": 0})
-        yield _sse(
-            "message_delta",
-            {
-                "type": "message_delta",
-                "delta": {"stop_reason": stop_reason, "stop_sequence": None},
-                "usage": {"output_tokens": usage.get("completion_tokens", 0)},
-            },
-        )
-        yield _sse("message_stop", {"type": "message_stop"})
 
     # ------------------------------------------------------------------ #
     # Lifecycle                                                            #

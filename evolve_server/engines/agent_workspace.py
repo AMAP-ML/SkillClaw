@@ -78,6 +78,10 @@ workspace/
 - You may inspect and edit `SKILL.md`, `references/`, `scripts/`, `assets/`,
   `history/`, and other supporting files that belong to a skill.
 - If there are no actionable patterns, make no changes — that is fine.
+- Before finalizing any changed skill, complete the self-validation required
+  by `EVOLVE_AGENTS.md`; if validation fails, keep editing or revert the
+  change rather than leaving a known-failing skill in `skills/`.
+- Record self-validation results in the paired `history/v<N>_evidence.md` file.
 
 ## Memory
 

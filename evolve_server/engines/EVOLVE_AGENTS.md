@@ -34,14 +34,15 @@ workspace/
    which skills (if any) were referenced.
 3. **Decide** what actions to take for each skill or pattern.
 4. **Execute** by writing new or updated skill bundles in `skills/`.
+5. **Self-validate** every changed skill before finalizing it; if validation
+   fails, continue editing or revert the change.
 
 Work through these steps autonomously. Use your file-reading and writing
 tools to inspect session data and produce skill bundles.
 
 **File access boundary**: All your file operations MUST stay within this
 workspace directory. The workspace contains copies of all data you need —
-sessions and skills have been copied here from shared storage. Do NOT read
-or write files outside the workspace. The server will collect your changes
+sessions and skills have been copied here from shared storage. Do NOT read or write files outside the workspace. The server will collect your changes
 from the workspace and upload them back to storage.
 
 ---
@@ -179,7 +180,49 @@ category: general
 <Markdown body with practical guidance>
 ```
 
-## Step 5: Maintain Skill History
+## Step 5: Self-validation before finalizing
+
+Before you consider any new or changed skill complete, validate it inside the
+center harness workspace. This is an internal publication gate for Agentic
+Evolver: do not leave a skill change in `skills/` unless it has passed your
+self-validation, or unless you intentionally revert the change because it
+cannot be validated.
+
+For every skill you create or modify:
+
+1. Define 1-3 small validation scenarios from the current session evidence
+   and the skill's trigger conditions. Prefer cases that would have caught the
+   observed failure or confirmed the observed success pattern.
+2. Run static checks:
+   - `SKILL.md` has valid frontmatter with a clear `name` and `description`.
+   - Trigger conditions and any `NOT for:` boundaries did not become overly
+     broad.
+   - Relative references to `references/`, `scripts/`, or `assets/` exist.
+   - Key environment facts supported by evidence, such as API endpoints,
+     ports, filenames, command formats, and payload shapes, were preserved
+     unless the evidence clearly justified changing them.
+3. Run the smallest safe smoke test when possible. Examples: a helper script
+   `--help`, a dry-run command, a fixture input, or a minimal command copied
+   from the skill. Keep all commands within the workspace directory and do NOT
+   require external credentials or destructive side effects.
+4. If no runnable command exists, perform an evidence-based static simulation:
+   explain how a future agent would use the revised skill on one representative
+   session and what correct next steps it should infer.
+5. If validation fails, continue editing the skill and re-run validation. Do
+   not finalize a known-failing change. If you cannot make it pass, revert that
+   skill change or choose `skip`.
+
+Record the validation in the paired history evidence file,
+`history/v<N>_evidence.md` for existing skills or `history/v0_evidence.md` for
+new skills. Include a `## Self-validation before finalizing` section with:
+
+- validation scenarios
+- checks or commands run
+- pass/fail result
+- fixes made after any failed check
+- limitations when only static validation was possible
+
+## Step 6: Maintain Skill History
 
 History is the evolution ledger — it records what changed, why, and what
 evidence supported each decision. **Every action (create, improve,
@@ -352,6 +395,8 @@ instructions like "go inspect the source code".
   action on that skill, if that history directory exists. This is
   mandatory, not optional.
 - ALWAYS save the old version and evidence before making changes.
+- ALWAYS complete center harness self-validation before finalizing a changed
+  skill, and record the result in the paired `history/v<N>_evidence.md` file.
 - ALWAYS use version-based history filenames (`v<N>.md`,
   `v<N>_evidence.md`); never use date-based filenames.
 - Do NOT modify files in `sessions/` — they are read-only input.

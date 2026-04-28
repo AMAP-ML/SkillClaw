@@ -14,24 +14,235 @@ _STOP_REASON_MAP = {
     "content_filter": "stop_sequence",
 }
 
+_CLAUDE_TOOL_NAME_ALIASES = {
+    "agent": "Agent",
+    "ask_user_question": "AskUserQuestion",
+    "ask-user-question": "AskUserQuestion",
+    "askuserquestion": "AskUserQuestion",
+    "bash": "Bash",
+    "cron_create": "CronCreate",
+    "cron-create": "CronCreate",
+    "croncreate": "CronCreate",
+    "cron_delete": "CronDelete",
+    "cron-delete": "CronDelete",
+    "crondelete": "CronDelete",
+    "cron_list": "CronList",
+    "cron-list": "CronList",
+    "cronlist": "CronList",
+    "edit": "Edit",
+    "edit_file": "Edit",
+    "enter_plan_mode": "EnterPlanMode",
+    "enter-plan-mode": "EnterPlanMode",
+    "enterplanmode": "EnterPlanMode",
+    "enter_worktree": "EnterWorktree",
+    "enter-worktree": "EnterWorktree",
+    "enterworktree": "EnterWorktree",
+    "exit_plan_mode": "ExitPlanMode",
+    "exit-plan-mode": "ExitPlanMode",
+    "exitplanmode": "ExitPlanMode",
+    "exit_worktree": "ExitWorktree",
+    "exit-worktree": "ExitWorktree",
+    "exitworktree": "ExitWorktree",
+    "glob": "Glob",
+    "grep": "Grep",
+    "list": "LS",
+    "ls": "LS",
+    "multi_edit": "MultiEdit",
+    "multi-edit": "MultiEdit",
+    "multiedit": "MultiEdit",
+    "notebook_edit": "NotebookEdit",
+    "notebook-edit": "NotebookEdit",
+    "notebookedit": "NotebookEdit",
+    "notebook_read": "NotebookRead",
+    "notebook-read": "NotebookRead",
+    "notebookread": "NotebookRead",
+    "read": "Read",
+    "read_file": "Read",
+    "read-file": "Read",
+    "file_read": "Read",
+    "file-read": "Read",
+    "readfile": "Read",
+    "schedule_wakeup": "ScheduleWakeup",
+    "schedule-wakeup": "ScheduleWakeup",
+    "schedulewakeup": "ScheduleWakeup",
+    "skill": "Skill",
+    "task": "Task",
+    "task_output": "TaskOutput",
+    "task-output": "TaskOutput",
+    "taskoutput": "TaskOutput",
+    "task_stop": "TaskStop",
+    "task-stop": "TaskStop",
+    "taskstop": "TaskStop",
+    "todo_write": "TodoWrite",
+    "todo-write": "TodoWrite",
+    "todowrite": "TodoWrite",
+    "web_fetch": "WebFetch",
+    "web-fetch": "WebFetch",
+    "webfetch": "WebFetch",
+    "web_search": "WebSearch",
+    "web-search": "WebSearch",
+    "websearch": "WebSearch",
+    "write": "Write",
+    "write_file": "Write",
+    "write-file": "Write",
+    "file_write": "Write",
+    "file-write": "Write",
+    "writefile": "Write",
+}
+_FILE_PATH_TOOLS = {"Edit", "MultiEdit", "Read", "Write"}
+_PATH_TOOLS = {"Glob", "Grep", "LS"}
+_NOTEBOOK_PATH_TOOLS = {"NotebookEdit", "NotebookRead"}
 
-def _flatten_tool_result_content(content: Any) -> str:
+
+def _normalize_tool_use_name(name: Any, tool_names: set[str] | None = None) -> str:
+    raw = str(name or "unknown_tool")
+    if tool_names is None:
+        return raw
+    if raw in tool_names:
+        return raw
+
+    lower_tool_names = {tool_name.lower(): tool_name for tool_name in tool_names}
+    exact_case_match = lower_tool_names.get(raw.lower())
+    if exact_case_match:
+        return exact_case_match
+
+    alias = _CLAUDE_TOOL_NAME_ALIASES.get(raw.lower())
+    if alias in tool_names:
+        return alias
+    return raw
+
+
+def _sanitize_tool_use_input(name: str, value: Any) -> dict[str, Any]:
+    """Normalize OpenAI-style tool arguments back to Claude Code schemas."""
+    parsed = json_loads_tool_input(value)
+    sanitized = dict(parsed)
+    if name == "Bash" and "command" not in sanitized and "cmd" in sanitized:
+        sanitized["command"] = sanitized.pop("cmd")
+
+    if name in _FILE_PATH_TOOLS and "file_path" not in sanitized:
+        for alias in ("path", "file"):
+            if alias in sanitized:
+                sanitized["file_path"] = sanitized[alias]
+                break
+
+    if name in _FILE_PATH_TOOLS and "file_path" in sanitized:
+        sanitized.pop("path", None)
+        sanitized.pop("file", None)
+
+    if name in _PATH_TOOLS and "path" not in sanitized:
+        for alias in ("file_path", "file"):
+            if alias in sanitized:
+                sanitized["path"] = sanitized[alias]
+                break
+
+    if name in _PATH_TOOLS and "path" in sanitized:
+        sanitized.pop("file_path", None)
+        sanitized.pop("file", None)
+
+    if name in _NOTEBOOK_PATH_TOOLS and "notebook_path" not in sanitized:
+        for alias in ("path", "file_path", "file"):
+            if alias in sanitized:
+                sanitized["notebook_path"] = sanitized[alias]
+                break
+
+    if name in _NOTEBOOK_PATH_TOOLS and "notebook_path" in sanitized:
+        sanitized.pop("path", None)
+        sanitized.pop("file_path", None)
+        sanitized.pop("file", None)
+
+    if name == "Edit":
+        for src, dst in (("oldString", "old_string"), ("newString", "new_string"), ("replaceAll", "replace_all")):
+            if src in sanitized and dst not in sanitized:
+                sanitized[dst] = sanitized.pop(src)
+    elif name == "MultiEdit" and isinstance(sanitized.get("edits"), list):
+        edits = []
+        for edit in sanitized["edits"]:
+            if not isinstance(edit, dict):
+                edits.append(edit)
+                continue
+            item = dict(edit)
+            for src, dst in (("oldString", "old_string"), ("newString", "new_string"), ("replaceAll", "replace_all")):
+                if src in item and dst not in item:
+                    item[dst] = item.pop(src)
+            edits.append(item)
+        sanitized["edits"] = edits
+
+    if name == "Read" and sanitized.get("pages") == "":
+        sanitized.pop("pages", None)
+
+    return sanitized
+
+
+def _flatten_openai_message_content(content: Any) -> str:
     if isinstance(content, str):
         return content
     if isinstance(content, list):
         parts: list[str] = []
         for item in content:
             if isinstance(item, dict):
-                if item.get("type") in {"text", "input_text", "output_text"}:
-                    text = item.get("text")
-                    if isinstance(text, str):
-                        parts.append(text)
-                elif "content" in item:
-                    parts.append(_flatten_tool_result_content(item.get("content")))
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+                elif isinstance(item.get("content"), str):
+                    parts.append(item["content"])
             elif item is not None:
                 parts.append(str(item))
         return " ".join(part for part in parts if part)
     return str(content) if content is not None else ""
+
+
+def _anthropic_usage_from_openai_usage(usage: dict[str, Any]) -> dict[str, int]:
+    prompt_tokens = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+    completion_tokens = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
+    details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details") or {}
+    cached_tokens = 0
+    if isinstance(details, dict):
+        cached_tokens = int(details.get("cached_tokens") or 0)
+    input_tokens = max(0, prompt_tokens - cached_tokens)
+    out = {"input_tokens": input_tokens, "output_tokens": completion_tokens}
+    if cached_tokens:
+        out["cache_read_input_tokens"] = cached_tokens
+    return out
+
+
+def _tool_result_to_openai_content(block: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
+    text_parts: list[str] = []
+    image_parts: list[dict[str, Any]] = []
+
+    def collect(value: Any) -> None:
+        if isinstance(value, str):
+            if value:
+                text_parts.append(value)
+            return
+        if isinstance(value, list):
+            for item in value:
+                collect(item)
+            return
+        if isinstance(value, dict):
+            value_type = value.get("type")
+            if value_type in {"text", "input_text", "output_text"}:
+                text = value.get("text")
+                if isinstance(text, str) and text:
+                    text_parts.append(text)
+                return
+            if value_type == "image":
+                image_part = _image_block_to_openai_part(value)
+                if image_part:
+                    image_parts.append(image_part)
+                return
+            if "content" in value:
+                collect(value.get("content"))
+            return
+        if value is not None:
+            text_parts.append(str(value))
+
+    collect(block.get("content"))
+    text = " ".join(part for part in text_parts if part).strip()
+    if block.get("is_error") is True:
+        text = f"Tool error: {text}" if text else "Tool error"
+    elif not text:
+        text = "(image result attached)" if image_parts else "(empty)"
+    return text, image_parts
 
 
 def _image_block_to_openai_part(block: dict[str, Any]) -> dict[str, Any] | None:
@@ -145,13 +356,15 @@ def to_openai_body(body: dict[str, Any]) -> dict[str, Any]:
                     }
                 )
             elif block_type == "tool_result":
+                tool_text, tool_images = _tool_result_to_openai_content(block)
                 tool_results.append(
                     {
                         "role": "tool",
                         "tool_call_id": str(block.get("tool_use_id") or ""),
-                        "content": _flatten_tool_result_content(block.get("content")),
+                        "content": tool_text,
                     }
                 )
+                content_parts.extend(tool_images)
 
         text = " ".join(text_parts).strip()
         has_image = any(part.get("type") == "image_url" for part in content_parts)
@@ -164,8 +377,8 @@ def to_openai_body(body: dict[str, Any]) -> dict[str, Any]:
             continue
         if tool_results:
             normalized.extend(tool_results)
-            if text:
-                normalized.append({**msg, "content": text})
+            if text or content_parts:
+                normalized.append({**msg, "content": openai_content})
             continue
         normalized.append({**msg, "content": openai_content})
 
@@ -186,11 +399,15 @@ def to_openai_body(body: dict[str, Any]) -> dict[str, Any]:
     return openai_body
 
 
-def from_openai_response(openai_resp: dict[str, Any], model: str) -> dict[str, Any]:
+def from_openai_response(
+    openai_resp: dict[str, Any],
+    model: str,
+    tool_names: set[str] | None = None,
+) -> dict[str, Any]:
     """Convert an OpenAI chat completion response to Anthropic /v1/messages format."""
     choice = openai_resp.get("choices", [{}])[0]
     message = choice.get("message", {}) if isinstance(choice.get("message"), dict) else {}
-    content_text = message.get("content") or ""
+    content_text = _flatten_openai_message_content(message.get("content"))
     raw_tool_calls = message.get("tool_calls")
     tool_calls = raw_tool_calls if isinstance(raw_tool_calls, list) else []
     finish_reason = choice.get("finish_reason", "stop")
@@ -203,18 +420,20 @@ def from_openai_response(openai_resp: dict[str, Any], model: str) -> dict[str, A
         if not isinstance(tool_call, dict):
             continue
         function = tool_call.get("function") if isinstance(tool_call.get("function"), dict) else {}
+        tool_name = _normalize_tool_use_name(function.get("name"), tool_names)
         content_blocks.append(
             {
                 "type": "tool_use",
                 "id": str(tool_call.get("id") or f"call_{idx}"),
-                "name": str(function.get("name") or "unknown_tool"),
-                "input": json_loads_tool_input(function.get("arguments")),
+                "name": tool_name,
+                "input": _sanitize_tool_use_input(tool_name, function.get("arguments")),
             }
         )
     if not content_blocks:
         content_blocks.append({"type": "text", "text": ""})
 
     usage = openai_resp.get("usage", {})
+    usage = usage if isinstance(usage, dict) else {}
     return {
         "id": openai_resp.get("id", "msg_skillclaw"),
         "type": "message",
@@ -223,21 +442,23 @@ def from_openai_response(openai_resp: dict[str, Any], model: str) -> dict[str, A
         "content": content_blocks,
         "stop_reason": stop_reason,
         "stop_sequence": None,
-        "usage": {
-            "input_tokens": usage.get("prompt_tokens", 0),
-            "output_tokens": usage.get("completion_tokens", 0),
-        },
+        "usage": _anthropic_usage_from_openai_usage(usage),
     }
 
 
-async def stream_from_openai_result(result: dict[str, Any], model: str) -> AsyncIterator[str]:
+async def stream_from_openai_result(
+    result: dict[str, Any],
+    model: str,
+    tool_names: set[str] | None = None,
+) -> AsyncIterator[str]:
     """Yield Anthropic-format SSE events from an internal OpenAI chat result."""
     payload = result["response"]
-    choice = payload.get("choices", [{}])[0]
-    anthropic_payload = from_openai_response(payload, model)
+    anthropic_payload = from_openai_response(payload, model, tool_names)
     content_blocks = anthropic_payload.get("content", [])
     stop_reason = anthropic_payload.get("stop_reason") or "end_turn"
     usage = payload.get("usage", {})
+    usage = usage if isinstance(usage, dict) else {}
+    anthropic_usage = _anthropic_usage_from_openai_usage(usage)
     msg_id = payload.get("id", "msg_skillclaw")
 
     def sse(event: str, data: dict[str, Any]) -> str:
@@ -255,7 +476,7 @@ async def stream_from_openai_result(result: dict[str, Any], model: str) -> Async
                 "model": model,
                 "stop_reason": None,
                 "stop_sequence": None,
-                "usage": {"input_tokens": usage.get("prompt_tokens", 0), "output_tokens": 0},
+                "usage": {**anthropic_usage, "output_tokens": 0},
             },
         },
     )
@@ -316,7 +537,7 @@ async def stream_from_openai_result(result: dict[str, Any], model: str) -> Async
         {
             "type": "message_delta",
             "delta": {"stop_reason": stop_reason, "stop_sequence": None},
-            "usage": {"output_tokens": usage.get("completion_tokens", 0)},
+            "usage": {"output_tokens": anthropic_usage.get("output_tokens", 0)},
         },
     )
     yield sse("message_stop", {"type": "message_stop"})

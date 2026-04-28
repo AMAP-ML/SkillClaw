@@ -9,11 +9,13 @@ prompts, forwards to a real LLM API, and optionally collects PRM scores.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
 import random
 import re
+import struct
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -28,10 +30,10 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from .config import SkillClawConfig
 from .data_formatter import ConversationSample
 from .prm_scorer import PRMScorer
-from .skill_manager import SkillManager
-from .utils import run_llm
 from .protocols import anthropic_messages as anthropic_protocol
 from .protocols import openai_responses as responses_protocol
+from .skill_manager import SkillManager
+from .utils import run_llm
 
 logger = logging.getLogger(__name__)
 
@@ -1069,6 +1071,290 @@ def _anthropic_to_openai_body(body: dict[str, Any]) -> dict[str, Any]:
     return anthropic_protocol.to_openai_body(body)
 
 
+def _anthropic_request_tool_names(body: dict[str, Any]) -> set[str]:
+    tool_names: set[str] = set()
+    tools = body.get("tools")
+    if not isinstance(tools, list):
+        return tool_names
+    for item in tools:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if name:
+            tool_names.add(name)
+    return tool_names
+
+
+_IMAGE_TOKEN_ESTIMATE = 1600
+
+
+def _data_url_bytes(url: str) -> bytes | None:
+    if not url.startswith("data:") or "," not in url:
+        return None
+    header, data = url.split(",", 1)
+    if ";base64" not in header:
+        return None
+    try:
+        return base64.b64decode(data, validate=False)
+    except Exception:
+        return None
+
+
+def _image_dimensions_from_bytes(data: bytes) -> tuple[int, int] | None:
+    if data.startswith(b"\x89PNG\r\n\x1a\n") and len(data) >= 24:
+        width, height = struct.unpack(">II", data[16:24])
+        return (width, height) if width > 0 and height > 0 else None
+    if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
+        if len(data) >= 10:
+            width, height = struct.unpack("<HH", data[6:10])
+            return (width, height) if width > 0 and height > 0 else None
+        return None
+    if data.startswith(b"RIFF") and len(data) >= 30 and data[8:12] == b"WEBP":
+        if data[12:16] == b"VP8X":
+            width = int.from_bytes(data[24:27], "little") + 1
+            height = int.from_bytes(data[27:30], "little") + 1
+            return (width, height) if width > 0 and height > 0 else None
+        if data[12:16] == b"VP8 " and len(data) >= 30:
+            width = struct.unpack("<H", data[26:28])[0] & 0x3FFF
+            height = struct.unpack("<H", data[28:30])[0] & 0x3FFF
+            return (width, height) if width > 0 and height > 0 else None
+    if data.startswith(b"\xff\xd8"):
+        index = 2
+        while index + 9 < len(data):
+            if data[index] != 0xFF:
+                index += 1
+                continue
+            marker = data[index + 1]
+            index += 2
+            if marker in {0xD8, 0xD9}:
+                continue
+            if index + 2 > len(data):
+                return None
+            segment_length = struct.unpack(">H", data[index:index + 2])[0]
+            if segment_length < 2 or index + segment_length > len(data):
+                return None
+            if marker in {
+                0xC0,
+                0xC1,
+                0xC2,
+                0xC3,
+                0xC5,
+                0xC6,
+                0xC7,
+                0xC9,
+                0xCA,
+                0xCB,
+                0xCD,
+                0xCE,
+                0xCF,
+            }:
+                if segment_length >= 7:
+                    height, width = struct.unpack(">HH", data[index + 3:index + 7])
+                    return (width, height) if width > 0 and height > 0 else None
+                return None
+            index += segment_length
+    return None
+
+
+def _image_token_estimate_from_url(url: str) -> int:
+    data = _data_url_bytes(url)
+    if data is None:
+        return _IMAGE_TOKEN_ESTIMATE
+    dimensions = _image_dimensions_from_bytes(data)
+    if dimensions is None:
+        return _IMAGE_TOKEN_ESTIMATE
+    width, height = dimensions
+    return max(_IMAGE_TOKEN_ESTIMATE, (width * height + 749) // 750)
+
+
+def _image_token_estimate_from_part(content: dict[str, Any]) -> int:
+    image_url = content.get("image_url")
+    url = image_url.get("url") if isinstance(image_url, dict) else image_url
+    if not isinstance(url, str) or not url:
+        source = content.get("source") if isinstance(content.get("source"), dict) else {}
+        if source.get("type") == "base64":
+            media_type = str(source.get("media_type") or "image/png")
+            data = str(source.get("data") or "")
+            url = f"data:{media_type};base64,{data}" if data else ""
+        else:
+            url = str(content.get("url") or "")
+    if not url:
+        return _IMAGE_TOKEN_ESTIMATE
+    return _image_token_estimate_from_url(url)
+
+
+def _estimate_image_content_tokens(content: Any) -> int:
+    if isinstance(content, list):
+        return sum(_estimate_image_content_tokens(item) for item in content)
+    if isinstance(content, dict):
+        item_type = content.get("type")
+        count = _image_token_estimate_from_part(content) if item_type in {"image", "image_url", "input_image"} else 0
+        if "content" in content:
+            count += _estimate_image_content_tokens(content.get("content"))
+        return count
+    return 0
+
+
+def _token_estimate_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if not isinstance(item, dict):
+                if item is not None:
+                    parts.append(str(item))
+                continue
+            item_type = item.get("type")
+            if item_type in {"text", "input_text", "output_text"} and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+            elif item_type in {"image", "image_url"}:
+                parts.append("[image]")
+            elif "content" in item:
+                parts.append(_token_estimate_text(item.get("content")))
+        return " ".join(part for part in parts if part)
+    if isinstance(content, dict):
+        return json.dumps(content, ensure_ascii=False, sort_keys=True)
+    return str(content) if content is not None else ""
+
+
+def _estimate_openai_body_input_tokens(tokenizer: Any, openai_body: dict[str, Any]) -> int:
+    messages = list(openai_body.get("messages") or [])
+    tools = openai_body.get("tools")
+    image_tokens = sum(_estimate_image_content_tokens(msg.get("content")) for msg in messages if isinstance(msg, dict))
+    if tokenizer is not None:
+        try:
+            text = tokenizer.apply_chat_template(
+                _normalize_messages_for_template(messages),
+                tools=tools if tools else None,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+            tokenized = tokenizer(text, add_special_tokens=False)
+            input_ids = tokenized["input_ids"] if isinstance(tokenized, dict) else tokenized.input_ids
+            return max(0, len(input_ids) + image_tokens)
+        except Exception:
+            pass
+
+    text_parts = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        text_parts.append(f"{msg.get('role', '')}: {_token_estimate_text(msg.get('content'))}")
+        if msg.get("tool_calls"):
+            text_parts.append(json.dumps(msg.get("tool_calls"), ensure_ascii=False, sort_keys=True))
+    if tools:
+        text_parts.append(json.dumps(tools, ensure_ascii=False, sort_keys=True))
+    text = "\n".join(part for part in text_parts if part)
+    return max(1, (len(text) + 3) // 4 + image_tokens)
+
+
+def _message_identity(message: dict[str, Any]) -> str:
+    try:
+        return json.dumps(message, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    except Exception:
+        return str(message)
+
+
+def _split_leading_system_messages(messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    index = 0
+    while index < len(messages):
+        msg = messages[index]
+        if not isinstance(msg, dict) or msg.get("role") != "system":
+            break
+        index += 1
+    return messages[:index], messages[index:]
+
+
+def _canonical_overlap_message(message: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(message)
+    if "content" in normalized:
+        normalized["content"] = _flatten_message_content(normalized.get("content"))
+    return normalized
+
+
+def _merge_assistant_overlap_run(messages: list[dict[str, Any]]) -> dict[str, Any]:
+    content_parts: list[str] = []
+    tool_calls: list[Any] = []
+    for msg in messages:
+        content = _flatten_message_content(msg.get("content"))
+        if content:
+            content_parts.append(content)
+        msg_tool_calls = msg.get("tool_calls")
+        if isinstance(msg_tool_calls, list):
+            tool_calls.extend(msg_tool_calls)
+
+    merged: dict[str, Any] = {"role": "assistant", "content": " ".join(content_parts)}
+    if tool_calls:
+        merged["tool_calls"] = tool_calls
+    return merged
+
+
+def _messages_for_overlap(messages: list[dict[str, Any]]) -> list[tuple[str, int]]:
+    entries: list[tuple[str, int]] = []
+    index = 0
+    while index < len(messages):
+        msg = messages[index]
+        if not isinstance(msg, dict):
+            entries.append((_message_identity({"value": msg}), index + 1))
+            index += 1
+            continue
+
+        if msg.get("role") == "assistant":
+            run = [msg]
+            next_index = index + 1
+            has_tool_calls = isinstance(msg.get("tool_calls"), list) and bool(msg.get("tool_calls"))
+            while next_index < len(messages):
+                next_msg = messages[next_index]
+                if not isinstance(next_msg, dict) or next_msg.get("role") != "assistant":
+                    break
+                run.append(next_msg)
+                has_tool_calls = has_tool_calls or (
+                    isinstance(next_msg.get("tool_calls"), list) and bool(next_msg.get("tool_calls"))
+                )
+                next_index += 1
+            if has_tool_calls:
+                entries.append((_message_identity(_merge_assistant_overlap_run(run)), next_index))
+                index = next_index
+                continue
+
+        entries.append((_message_identity(_canonical_overlap_message(msg)), index + 1))
+        index += 1
+    return entries
+
+
+def _merge_previous_response_messages(
+    previous_messages: list[dict[str, Any]],
+    current_messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not previous_messages:
+        return current_messages
+    if not current_messages:
+        return previous_messages
+
+    current_system_messages, current_body_messages = _split_leading_system_messages(current_messages)
+    if current_system_messages:
+        _, previous_body_messages = _split_leading_system_messages(previous_messages)
+    else:
+        previous_body_messages = previous_messages
+
+    previous_entries = _messages_for_overlap(previous_body_messages)
+    current_entries = _messages_for_overlap(current_body_messages)
+    previous_keys = [key for key, _ in previous_entries]
+    current_keys = [key for key, _ in current_entries]
+    if current_keys[: len(previous_keys)] == previous_keys:
+        return current_system_messages + current_body_messages
+
+    max_overlap = min(len(previous_keys), len(current_keys))
+    overlap = 0
+    for size in range(max_overlap, 0, -1):
+        if previous_keys[-size:] == current_keys[:size]:
+            overlap = size
+            break
+    current_drop_index = current_entries[overlap - 1][1] if overlap else 0
+    return current_system_messages + previous_body_messages + current_body_messages[current_drop_index:]
+
+
 def _normalize_responses_content(content: Any) -> str:
     return responses_protocol.normalize_content_to_text(content)
 
@@ -1092,8 +1378,12 @@ def _openai_chat_to_responses_payload(payload: dict[str, Any], model: str) -> di
     return responses_protocol.from_openai_chat_payload(payload, model)
 
 
-def _openai_to_anthropic_response(openai_resp: dict[str, Any], model: str) -> dict[str, Any]:
-    return anthropic_protocol.from_openai_response(openai_resp, model)
+def _openai_to_anthropic_response(
+    openai_resp: dict[str, Any],
+    model: str,
+    tool_names: set[str] | None = None,
+) -> dict[str, Any]:
+    return anthropic_protocol.from_openai_response(openai_resp, model, tool_names)
 
 
 # ------------------------------------------------------------------ #
@@ -1420,12 +1710,29 @@ class SkillClawAPIServer:
         # forwards container Anthropic SDK calls to ANTHROPIC_BASE_URL).
         # ---------------------------------------------------------------- #
 
+        @app.post("/v1/messages/count_tokens")
+        async def anthropic_count_tokens(
+            request: Request,
+            authorization: Optional[str] = Header(default=None),
+            x_api_key: Optional[str] = Header(default=None, alias="x-api-key"),
+        ):
+            owner: SkillClawAPIServer = request.app.state.owner
+            owner._mark_request_activity()
+            auth_header = authorization or (f"Bearer {x_api_key}" if x_api_key else None)
+            await owner._check_auth(auth_header)
+
+            raw_body = await request.json()
+            openai_body = _anthropic_to_openai_body(raw_body)
+            input_tokens = _estimate_openai_body_input_tokens(owner._tokenizer, openai_body)
+            return JSONResponse(content={"input_tokens": input_tokens})
+
         @app.post("/v1/messages")
         async def anthropic_messages(
             request: Request,
             authorization: Optional[str] = Header(default=None),
             x_api_key: Optional[str] = Header(default=None, alias="x-api-key"),
             x_session_id: Optional[str] = Header(default=None),
+            x_claude_code_session_id: Optional[str] = Header(default=None, alias="x-claude-code-session-id"),
             x_turn_type: Optional[str] = Header(default=None),
             x_session_done: Optional[str] = Header(default=None),
         ):
@@ -1437,6 +1744,7 @@ class SkillClawAPIServer:
 
             raw_body = await request.json()
             stream = bool(raw_body.get("stream", False))
+            tool_names = _anthropic_request_tool_names(raw_body)
             openai_body = _anthropic_to_openai_body(raw_body)
             model = raw_body.get("model") or owner._served_model
 
@@ -1445,7 +1753,7 @@ class SkillClawAPIServer:
                 rewritten_messages, _ = _rewrite_new_session_bootstrap_prompt(incoming_messages)
                 openai_body["messages"] = rewritten_messages
 
-            _raw_sid = x_session_id or ""
+            _raw_sid = x_session_id or x_claude_code_session_id or raw_body.get("session_id") or ""
             if _raw_sid:
                 session_id = _raw_sid
                 turn_type = _resolve_turn_type(x_turn_type, raw_body.get("turn_type"), default="main")
@@ -1463,10 +1771,10 @@ class SkillClawAPIServer:
             )
             if stream:
                 return StreamingResponse(
-                    owner._stream_anthropic_response(result, model),
+                    owner._stream_anthropic_response(result, model, tool_names),
                     media_type="text/event-stream",
                 )
-            return JSONResponse(content=_openai_to_anthropic_response(result["response"], model))
+            return JSONResponse(content=_openai_to_anthropic_response(result["response"], model, tool_names))
 
         return app
 
@@ -2237,7 +2545,12 @@ class SkillClawAPIServer:
         """Return whether /v1/responses should be forwarded as Responses API."""
         return str(getattr(self.config, "llm_api_mode", "chat") or "chat").lower() == "responses"
 
-    def _prepare_responses_forward(self, body: dict[str, Any], *, stream: bool) -> tuple[str, dict[str, Any], dict[str, str]]:
+    def _prepare_responses_forward(
+        self,
+        body: dict[str, Any],
+        *,
+        stream: bool,
+    ) -> tuple[str, dict[str, Any], dict[str, str]]:
         """Build URL, body, and headers for native Responses forwarding.
 
         Native mode intentionally keeps Responses-only tools (custom, web_search,
@@ -2878,9 +3191,14 @@ class SkillClawAPIServer:
         async for chunk in responses_protocol.stream_response(response_payload):
             yield chunk
 
-    async def _stream_anthropic_response(self, result: dict[str, Any], model: str):
+    async def _stream_anthropic_response(
+        self,
+        result: dict[str, Any],
+        model: str,
+        tool_names: set[str] | None = None,
+    ):
         """Yield Anthropic-format SSE events from an internal result dict."""
-        async for chunk in anthropic_protocol.stream_from_openai_result(result, model):
+        async for chunk in anthropic_protocol.stream_from_openai_result(result, model, tool_names):
             yield chunk
 
 

@@ -222,6 +222,221 @@ async def test_responses_endpoint_passthroughs_native_stream():
     assert response.text == 'data: {"type":"response.created","upstream":true}\n\ndata: [DONE]\n\n'
 
 
+@pytest.mark.asyncio
+async def test_responses_chat_bridge_merges_previous_response_history(monkeypatch, tmp_path):
+    monkeypatch.setattr(SkillClawAPIServer, "_load_tokenizer", lambda self: None)
+    server = SkillClawAPIServer(
+        SkillClawConfig(
+            proxy_api_key="skillclaw",
+            record_enabled=False,
+            record_dir=str(tmp_path),
+            claw_type="nanoclaw",
+        )
+    )
+    calls = []
+
+    async def fake_handle_request(body, session_id, turn_type, session_done):
+        calls.append(body)
+        idx = len(calls)
+        return {
+            "response": {
+                "id": f"chatcmpl_{idx}",
+                "created": 0,
+                "choices": [
+                    {"message": {"role": "assistant", "content": f"ok {idx}"}, "finish_reason": "stop"}
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            }
+        }
+
+    server._handle_request = fake_handle_request
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test")
+    try:
+        first = await client.post(
+            "/v1/responses",
+            headers={"Authorization": "Bearer skillclaw", "Session_id": "codex-session-1"},
+            json={"model": "skillclaw-model", "input": "first", "store": True},
+        )
+        second = await client.post(
+            "/v1/responses",
+            headers={"Authorization": "Bearer skillclaw", "Session_id": "codex-session-1"},
+            json={
+                "model": "skillclaw-model",
+                "input": "second",
+                "previous_response_id": first.json()["id"],
+                "store": True,
+            },
+        )
+    finally:
+        await client.aclose()
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert calls[1]["messages"] == [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "ok 1"},
+        {"role": "user", "content": "second"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_responses_continuation_keeps_new_instructions_first(monkeypatch, tmp_path):
+    monkeypatch.setattr(SkillClawAPIServer, "_load_tokenizer", lambda self: None)
+    server = SkillClawAPIServer(
+        SkillClawConfig(
+            proxy_api_key="skillclaw",
+            record_enabled=False,
+            record_dir=str(tmp_path),
+            claw_type="nanoclaw",
+        )
+    )
+    calls = []
+
+    async def fake_handle_request(body, session_id, turn_type, session_done):
+        calls.append(body)
+        idx = len(calls)
+        return {
+            "response": {
+                "id": f"chatcmpl_{idx}",
+                "created": 0,
+                "choices": [
+                    {"message": {"role": "assistant", "content": f"ok {idx}"}, "finish_reason": "stop"}
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            }
+        }
+
+    server._handle_request = fake_handle_request
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test")
+    try:
+        first = await client.post(
+            "/v1/responses",
+            headers={"Authorization": "Bearer skillclaw", "Session_id": "codex-session-1"},
+            json={"model": "skillclaw-model", "input": "first", "store": True},
+        )
+        second = await client.post(
+            "/v1/responses",
+            headers={"Authorization": "Bearer skillclaw", "Session_id": "codex-session-1"},
+            json={
+                "model": "skillclaw-model",
+                "instructions": "new system instructions",
+                "input": "second",
+                "previous_response_id": first.json()["id"],
+                "store": True,
+            },
+        )
+    finally:
+        await client.aclose()
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert calls[1]["messages"] == [
+        {"role": "system", "content": "new system instructions"},
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "ok 1"},
+        {"role": "user", "content": "second"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_responses_continuation_deduplicates_replayed_output_items(monkeypatch, tmp_path):
+    monkeypatch.setattr(SkillClawAPIServer, "_load_tokenizer", lambda self: None)
+    server = SkillClawAPIServer(
+        SkillClawConfig(
+            proxy_api_key="skillclaw",
+            record_enabled=False,
+            record_dir=str(tmp_path),
+            claw_type="nanoclaw",
+        )
+    )
+    calls = []
+
+    async def fake_handle_request(body, session_id, turn_type, session_done):
+        calls.append(body)
+        idx = len(calls)
+        if idx == 1:
+            return {
+                "response": {
+                    "id": "chatcmpl_1",
+                    "created": 0,
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "need tool",
+                                "tool_calls": [
+                                    {
+                                        "id": "call_1",
+                                        "type": "function",
+                                        "function": {"name": "Skill", "arguments": '{"name":"debug"}'},
+                                    }
+                                ],
+                            },
+                            "finish_reason": "tool_calls",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                }
+            }
+        return {
+            "response": {
+                "id": f"chatcmpl_{idx}",
+                "created": 0,
+                "choices": [
+                    {"message": {"role": "assistant", "content": f"ok {idx}"}, "finish_reason": "stop"}
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            }
+        }
+
+    server._handle_request = fake_handle_request
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test")
+    try:
+        first = await client.post(
+            "/v1/responses",
+            headers={"Authorization": "Bearer skillclaw", "Session_id": "codex-session-1"},
+            json={"model": "skillclaw-model", "input": "first", "store": True},
+        )
+        first_payload = first.json()
+        second = await client.post(
+            "/v1/responses",
+            headers={"Authorization": "Bearer skillclaw", "Session_id": "codex-session-1"},
+            json={
+                "model": "skillclaw-model",
+                "input": [
+                    *first_payload["output"],
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "second"}],
+                    },
+                ],
+                "previous_response_id": first_payload["id"],
+                "store": True,
+            },
+        )
+    finally:
+        await client.aclose()
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert calls[1]["messages"] == [
+        {"role": "user", "content": "first"},
+        {
+            "role": "assistant",
+            "content": "need tool",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "Skill", "arguments": '{"name":"debug"}'},
+                }
+            ],
+        },
+        {"role": "user", "content": "second"},
+    ]
+
+
 def test_prepare_responses_forward_keeps_native_codex_items_out_of_chat_conversion():
     server = object.__new__(SkillClawAPIServer)
     server.config = SkillClawConfig(

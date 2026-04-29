@@ -316,7 +316,10 @@ async def stream_from_openai_result(result: dict[str, Any], model: str) -> Async
         {
             "type": "message_delta",
             "delta": {"stop_reason": stop_reason, "stop_sequence": None},
-            "usage": {"output_tokens": usage.get("completion_tokens", 0)},
+            "usage": {
+                "input_tokens": usage.get("prompt_tokens", 0),
+                "output_tokens": usage.get("completion_tokens", 0),
+            },
         },
     )
     yield sse("message_stop", {"type": "message_stop"})

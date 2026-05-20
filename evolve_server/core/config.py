@@ -104,6 +104,16 @@ class EvolveServerConfig:
     validation_max_rejections: int = 1
     debug_dump_dir: str = ""
 
+    # Skill registry. Session queues and validation artifacts still use the
+    # storage settings above; this controls only skill assets/lifecycle.
+    skill_storage_backend: str = ""
+    nacos_server: str = ""
+    nacos_namespace_id: str = "public"
+    nacos_access_token: str = ""
+    nacos_username: str = ""
+    nacos_password: str = ""
+    nacos_label: str = "latest"
+
     # Scheduling
     interval_seconds: int = 600
     http_port: int = 8787
@@ -222,6 +232,13 @@ class EvolveServerConfig:
             validation_required_approvals=int(os.environ.get("EVOLVE_VALIDATION_REQUIRED_APPROVALS", "1")),
             validation_min_mean_score=float(os.environ.get("EVOLVE_VALIDATION_MIN_MEAN_SCORE", "0.75")),
             validation_max_rejections=int(os.environ.get("EVOLVE_VALIDATION_MAX_REJECTIONS", "1")),
+            skill_storage_backend=os.environ.get("EVOLVE_SKILL_STORAGE_BACKEND", ""),
+            nacos_server=os.environ.get("EVOLVE_NACOS_SERVER", ""),
+            nacos_namespace_id=os.environ.get("EVOLVE_NACOS_NAMESPACE_ID", "public"),
+            nacos_access_token=os.environ.get("EVOLVE_NACOS_ACCESS_TOKEN", ""),
+            nacos_username=os.environ.get("EVOLVE_NACOS_USERNAME", ""),
+            nacos_password=os.environ.get("EVOLVE_NACOS_PASSWORD", ""),
+            nacos_label=os.environ.get("EVOLVE_NACOS_LABEL", "latest"),
             interval_seconds=int(os.environ.get("EVOLVE_INTERVAL", "600")),
             http_port=int(os.environ.get("EVOLVE_PORT", "8787")),
             history_path=os.environ.get("EVOLVE_HISTORY_LOG", "evolve_history.jsonl"),
@@ -238,7 +255,8 @@ class EvolveServerConfig:
     def from_skillclaw_config(cls, config) -> "EvolveServerConfig":
         """Build from an existing ``SkillClawConfig`` (reuse sharing + LLM settings)."""
         engine = _first_env("EVOLVE_ENGINE", default="workflow").strip().lower() or "workflow"
-        storage_backend = str(getattr(config, "sharing_backend", "") or "").strip().lower()
+        sharing_backend = str(getattr(config, "sharing_backend", "") or "").strip().lower()
+        session_backend = str(getattr(config, "sharing_session_backend", "") or "").strip().lower()
         storage_endpoint = str(
             getattr(config, "sharing_endpoint", "") or getattr(config, "sharing_oss_endpoint", "") or ""
         )
@@ -281,8 +299,23 @@ class EvolveServerConfig:
 
         return cls(
             engine=engine,
-            storage_backend=storage_backend
-            or ("local" if local_root else "s3" if (storage_bucket or storage_endpoint) else "oss"),
+            storage_backend=_first_env("EVOLVE_STORAGE_BACKEND", default="")
+            or (
+                session_backend
+                if session_backend
+                else "local"
+                if local_root
+                else "s3"
+                if (storage_bucket or storage_endpoint) and sharing_backend != "nacos"
+                else ""
+            )
+            or (
+                "local"
+                if local_root
+                else "oss"
+                if sharing_backend != "nacos"
+                else ""
+            ),
             storage_endpoint=storage_endpoint,
             storage_bucket=storage_bucket,
             storage_access_key_id=storage_access_key_id,
@@ -311,6 +344,13 @@ class EvolveServerConfig:
             validation_required_approvals=int(os.environ.get("EVOLVE_VALIDATION_REQUIRED_APPROVALS", "1")),
             validation_min_mean_score=float(os.environ.get("EVOLVE_VALIDATION_MIN_MEAN_SCORE", "0.75")),
             validation_max_rejections=int(os.environ.get("EVOLVE_VALIDATION_MAX_REJECTIONS", "1")),
+            skill_storage_backend="nacos" if sharing_backend == "nacos" else "",
+            nacos_server=str(getattr(config, "sharing_nacos_server", "") or storage_endpoint),
+            nacos_namespace_id=str(getattr(config, "sharing_nacos_namespace_id", "") or "public"),
+            nacos_access_token=str(getattr(config, "sharing_nacos_access_token", "") or ""),
+            nacos_username=str(getattr(config, "sharing_nacos_username", "") or ""),
+            nacos_password=str(getattr(config, "sharing_nacos_password", "") or ""),
+            nacos_label=str(getattr(config, "sharing_nacos_label", "") or "latest"),
             openclaw_bin=os.environ.get("AGENT_EVOLVE_OPENCLAW_BIN", "openclaw"),
             openclaw_home=os.environ.get("AGENT_EVOLVE_OPENCLAW_HOME", ""),
             fresh=os.environ.get("AGENT_EVOLVE_FRESH", "1").lower() not in {"0", "false", "no"},

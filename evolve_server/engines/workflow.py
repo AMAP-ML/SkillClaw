@@ -82,11 +82,39 @@ class EvolveServer(EvolveEngineMixin):
             group_id=self.config.group_id,
         )
         self._id_registry = SkillIDRegistry()
+        self._nacos_skill_client = self._build_nacos_skill_client()
         self._running = False
 
         set_evolve_debug_dir(config.debug_dump_dir)
         set_summarizer_debug_dir(config.debug_dump_dir)
-        self._id_registry.load_from_oss(self._bucket, self._prefix)
+        if not self._uses_nacos_skill_registry():
+            self._id_registry.load_from_oss(self._bucket, self._prefix)
+
+    def _uses_nacos_skill_registry(self) -> bool:
+        return str(getattr(self.config, "skill_storage_backend", "") or "").strip().lower() == "nacos"
+
+    def _build_nacos_skill_client(self) -> Any | None:
+        if not self._uses_nacos_skill_registry():
+            return None
+        from skillclaw.nacos_skill_hub import NacosSkillClient
+
+        return NacosSkillClient(
+            server=str(getattr(self.config, "nacos_server", "") or ""),
+            namespace_id=str(getattr(self.config, "nacos_namespace_id", "") or "public"),
+            access_token=str(getattr(self.config, "nacos_access_token", "") or ""),
+            username=str(getattr(self.config, "nacos_username", "") or ""),
+            password=str(getattr(self.config, "nacos_password", "") or ""),
+        )
+
+    def _load_remote_skills(self) -> dict[str, dict[str, Any]]:
+        if self._nacos_skill_client is not None:
+            skills: dict[str, dict[str, Any]] = {}
+            for item in self._nacos_skill_client.list_skills():
+                name = str(item.get("name") or "")
+                if name:
+                    skills[name] = item
+            return skills
+        return super()._load_remote_skills()
 
     def _load_remote_skill_record(self, name: str) -> Optional[dict[str, Any]]:
         rec = self._load_remote_skills().get(name)
@@ -109,11 +137,56 @@ class EvolveServer(EvolveEngineMixin):
         return skill
 
     def _fetch_skill(self, name: str) -> Optional[str]:
+        if self._nacos_skill_client is not None:
+            try:
+                from skillclaw.nacos_skill_hub import _nacos_zip_to_bundle
+
+                record = self._load_remote_skill_record(name) or {}
+                labels = record.get("labels") if isinstance(record.get("labels"), dict) else {}
+                version = labels.get(str(getattr(self.config, "nacos_label", "") or "latest"))
+                zip_bytes = self._nacos_skill_client.download_skill_zip(
+                    name,
+                    version=version,
+                    label=str(getattr(self.config, "nacos_label", "") or "latest"),
+                )
+                bundle = _nacos_zip_to_bundle(zip_bytes)
+                data = bundle.get("SKILL.md")
+                return data.decode("utf-8") if data is not None else None
+            except Exception as exc:
+                logger.warning("[EvolveServer] failed to fetch Nacos skill %s: %s", name, exc)
+                return None
         return fetch_skill_content(self._bucket, self._prefix, name)
 
     def _upload_skill(self, skill: dict, action: str) -> None:
         name = skill.get("name", "")
         if not name:
+            return
+
+        if self._nacos_skill_client is not None:
+            from skillclaw.nacos_skill_hub import _bundle_to_nacos_zip, _next_version
+
+            md_content = build_skill_md(skill)
+            md_bytes = md_content.encode("utf-8")
+            record = self._load_remote_skill_record(name) or {}
+            try:
+                detail = self._nacos_skill_client.get_skill(name) if record else {}
+            except Exception:
+                detail = {}
+            target_version = _next_version(record, detail)
+            zip_bytes = _bundle_to_nacos_zip(name, {"SKILL.md": md_bytes})
+            self._nacos_skill_client.upload_skill_zip(
+                zip_bytes=zip_bytes,
+                filename=f"{name}-{target_version}.zip",
+                overwrite=True,
+                target_version=target_version,
+            )
+            self._nacos_skill_client.submit(name, target_version)
+            logger.info(
+                "[EvolveServer] uploaded and submitted skill %s to Nacos as %s via action=%s",
+                name,
+                target_version,
+                action,
+            )
             return
 
         skill_id = self._id_registry.get_or_create(name)
@@ -163,6 +236,14 @@ class EvolveServer(EvolveEngineMixin):
         )
 
     def _detect_conflict(self, name: str, incoming_skill: dict) -> bool:
+        if self._nacos_skill_client is not None:
+            existing_md = self._fetch_skill(name)
+            if not existing_md:
+                return False
+            existing_sha = hashlib.sha256(existing_md.encode("utf-8")).hexdigest()
+            incoming_md = build_skill_md(incoming_skill)
+            incoming_sha = hashlib.sha256(incoming_md.encode("utf-8")).hexdigest()
+            return existing_sha != incoming_sha
         existing_sha = self._id_registry.get_content_sha(name)
         if not existing_sha:
             return False
@@ -744,7 +825,8 @@ class EvolveServer(EvolveEngineMixin):
         published_records, validation_publish_summary = await self._finalize_validation_jobs()
         all_records = evolution_records + published_records
 
-        await self._call_storage(self._id_registry.save_to_oss, self._bucket, self._prefix)
+        if not self._uses_nacos_skill_registry():
+            await self._call_storage(self._id_registry.save_to_oss, self._bucket, self._prefix)
         if session_keys and not had_processing_error:
             await self._call_storage(delete_session_keys, self._bucket, session_keys)
         elif session_keys and had_processing_error:
@@ -813,7 +895,11 @@ class EvolveServer(EvolveEngineMixin):
 
         @app.get("/status")
         async def status():
-            entries = self._id_registry.all_entries()
+            entries = (
+                self._load_remote_skills()
+                if self._uses_nacos_skill_registry()
+                else self._id_registry.all_entries()
+            )
             pending_keys = await self._call_storage(list_session_keys, self._bucket, self._prefix)
             return JSONResponse(
                 content={
@@ -822,8 +908,8 @@ class EvolveServer(EvolveEngineMixin):
                     "registered_skills": len(entries),
                     "skills": {
                         name: {
-                            "skill_id": item["skill_id"],
-                            "version": item.get("version", 0),
+                            "skill_id": item.get("skill_id") or item.get("name") or name,
+                            "version": item.get("version") or (item.get("labels") or {}).get("latest") or 0,
                         }
                         for name, item in entries.items()
                     },

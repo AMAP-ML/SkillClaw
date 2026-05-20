@@ -69,6 +69,13 @@ _DEFAULTS: dict = {
         "region": "",
         "session_token": "",
         "local_root": "",
+        "session_backend": "",
+        "nacos_server": "",
+        "nacos_namespace_id": "public",
+        "nacos_access_token": "",
+        "nacos_username": "",
+        "nacos_password": "",
+        "nacos_label": "latest",
         "group_id": "default",
         "user_alias": "",
         "auto_pull_on_start": False,
@@ -286,6 +293,7 @@ class ConfigStore:
         sharing_region = _first_non_empty(sharing, "region")
         sharing_session_token = _first_non_empty(sharing, "session_token")
         sharing_local_root = _first_non_empty(sharing, "local_root")
+        sharing_session_backend = _first_non_empty(sharing, "session_backend")
 
         prm_provider = prm.get("provider", "openai")
         prm_url = str(prm.get("url", "") or llm_api_base)
@@ -346,6 +354,21 @@ class ConfigStore:
             sharing_region=sharing_region,
             sharing_session_token=sharing_session_token,
             sharing_local_root=sharing_local_root,
+            sharing_session_backend=sharing_session_backend,
+            sharing_nacos_server=str(sharing.get("nacos_server", "") or sharing_endpoint),
+            sharing_nacos_namespace_id=str(
+                sharing.get("nacos_namespace_id", "")
+                or sharing.get("namespace_id", "")
+                or "public"
+            ),
+            sharing_nacos_access_token=str(
+                sharing.get("nacos_access_token", "")
+                or sharing.get("access_token", "")
+                or ""
+            ),
+            sharing_nacos_username=str(sharing.get("nacos_username", "") or sharing.get("username", "") or ""),
+            sharing_nacos_password=str(sharing.get("nacos_password", "") or sharing.get("password", "") or ""),
+            sharing_nacos_label=str(sharing.get("nacos_label", "") or sharing.get("label", "") or "latest"),
             sharing_group_id=str(sharing.get("group_id", "default") or "default"),
             sharing_user_alias=str(sharing.get("user_alias", "") or ""),
             sharing_auto_pull_on_start=bool(sharing.get("auto_pull_on_start", False)),
@@ -415,6 +438,16 @@ class ConfigStore:
             if backend == "local":
                 lines += [
                     f"sharing.local_root: {sharing.get('local_root', '?')}",
+                ]
+            elif backend == "nacos":
+                lines += [
+                    f"sharing.nacos_server: {sharing.get('nacos_server') or sharing.get('endpoint', '?')}",
+                    "sharing.nacos_namespace: "
+                    f"{sharing.get('nacos_namespace_id') or sharing.get('namespace_id', 'public')}",
+                    f"sharing.nacos_label: {sharing.get('nacos_label') or sharing.get('label', 'latest')}",
+                    "sharing.nacos_lifecycle: upload -> submit; review/publish policy is controlled by Nacos",
+                    "sharing.session_backend: "
+                    f"{sharing.get('session_backend') or ('local' if sharing.get('local_root') else 'not configured')}",
                 ]
             else:
                 lines += [

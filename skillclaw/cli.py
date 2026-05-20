@@ -761,6 +761,11 @@ def _sharing_target(cfg) -> str:
     group = getattr(cfg, "sharing_group_id", "default")
     if backend == "local":
         return f"local storage ({cfg.sharing_local_root}/{group})"
+    if backend == "nacos":
+        server = getattr(cfg, "sharing_nacos_server", "") or getattr(cfg, "sharing_endpoint", "")
+        namespace_id = getattr(cfg, "sharing_nacos_namespace_id", "public")
+        label = getattr(cfg, "sharing_nacos_label", "latest")
+        return f"nacos ({namespace_id}, label={label} @ {server})"
     bucket = getattr(cfg, "sharing_bucket", "")
     endpoint = getattr(cfg, "sharing_endpoint", "")
     target = f"{bucket}/{group}" if bucket else group
@@ -797,8 +802,15 @@ def _require_sharing(cs: ConfigStore):
             raise click.ClickException(
                 "OSS credentials are not configured. Set sharing.access_key_id and sharing.secret_access_key."
             )
+    elif backend == "nacos":
+        if not (getattr(cfg, "sharing_nacos_server", "") or getattr(cfg, "sharing_endpoint", "")):
+            raise click.ClickException(
+                "Nacos sharing backend is not configured. Set sharing.nacos_server or sharing.endpoint first."
+            )
     else:
-        raise click.ClickException("Sharing backend is not configured. Set sharing.backend to local, s3, or oss.")
+        raise click.ClickException(
+            "Sharing backend is not configured. Set sharing.backend to local, s3, oss, or nacos."
+        )
     from .skill_hub import SkillHub
 
     hub = SkillHub.from_config(cfg)
@@ -833,7 +845,29 @@ def skills_push(no_filter):
         f"Done: {result['uploaded']} uploaded, "
         f"{result['skipped']} unchanged, "
         f"{result.get('filtered', 0)} filtered, "
+        f"{result.get('submitted', 0)} submitted, "
         f"{result['total_local']} total local skills."
+    )
+
+
+@skills.command(name="publish")
+@click.argument("name")
+@click.argument("version")
+@click.option(
+    "--no-update-latest",
+    is_flag=True,
+    help="Publish the version without updating the latest label.",
+)
+def skills_publish(name, version, no_update_latest):
+    """Publish an approved Nacos skill version."""
+    cs = ConfigStore()
+    cfg, hub = _require_sharing(cs)
+    if _sharing_backend(cfg) != "nacos" or not hasattr(hub, "publish_skill"):
+        raise click.ClickException("skills publish is only available when sharing.backend is nacos.")
+    result = hub.publish_skill(name, version, update_latest_label=not no_update_latest)
+    click.echo(
+        f"Published {result['skill_name']} {result['version']} "
+        f"(updated latest: {result['updated_latest_label']})."
     )
 
 
@@ -847,9 +881,12 @@ def skills_pull():
     msg = (
         f"Done: {result['downloaded']} downloaded, "
         f"{result['skipped']} unchanged, "
+        f"{result.get('failed', 0)} failed, "
         f"{result.get('deleted', 0)} deleted, "
         f"{result['total_remote']} total remote skills."
     )
+    if result.get("failed_names"):
+        msg += f" Failed: {', '.join(result.get('failed_names', []))}"
     if result.get("restored_from_backup"):
         msg += f" Restored from backup: {result.get('backup_dir', '')}"
     click.echo(msg)

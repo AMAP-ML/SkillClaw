@@ -2757,7 +2757,13 @@ class SkillClawAPIServer:
         try:
             from .skill_hub import SkillHub
 
-            hub = SkillHub.from_config(self.config)
+            hub = SkillHub.object_storage_from_config(self.config)
+            if hub is None:
+                logger.info(
+                    "[SkillHub] session remote upload skipped: no local/OSS/S3 storage configured "
+                    "(skill registry may still use Nacos)"
+                )
+                return
             session_payload = {
                 "session_id": session_id,
                 "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
@@ -2794,11 +2800,15 @@ class SkillClawAPIServer:
             hub = SkillHub.from_config(self.config)
             pull_result = hub.pull_skills(self.config.skills_dir, skip_names=skip_names)
             logger.info(
-                "[SkillHub] skill pull: %d downloaded, %d unchanged, %d deleted",
+                "[SkillHub] skill pull: %d downloaded, %d unchanged, %d failed, %d deleted, %d total remote",
                 pull_result["downloaded"],
                 pull_result["skipped"],
+                pull_result.get("failed", 0),
                 pull_result.get("deleted", 0),
+                pull_result.get("total_remote", 0),
             )
+            if pull_result.get("failed_names"):
+                logger.warning("[SkillHub] skill pull failed names: %s", ", ".join(pull_result["failed_names"]))
             if self.skill_manager and (
                 pull_result.get("downloaded", 0) > 0
                 or pull_result.get("deleted", 0) > 0

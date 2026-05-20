@@ -55,23 +55,15 @@ class ValidationStore:
 
     @classmethod
     def from_config(cls, config) -> "ValidationStore":
-        backend = str(getattr(config, "sharing_backend", "") or "").strip().lower()
-        endpoint = str(getattr(config, "sharing_endpoint", "") or "")
-        bucket = str(getattr(config, "sharing_bucket", "") or "")
-        access_key_id = str(getattr(config, "sharing_access_key_id", "") or "")
-        secret_access_key = str(getattr(config, "sharing_secret_access_key", "") or "")
-        local_root = str(getattr(config, "sharing_local_root", "") or "")
-        return cls(
-            backend=backend or ("local" if local_root else "s3" if (bucket or endpoint) else "oss"),
-            endpoint=endpoint,
-            bucket=bucket,
-            access_key_id=access_key_id,
-            secret_access_key=secret_access_key,
-            region=str(getattr(config, "sharing_region", "") or ""),
-            session_token=str(getattr(config, "sharing_session_token", "") or ""),
-            local_root=local_root,
-            group_id=str(getattr(config, "sharing_group_id", "default") or "default"),
-        )
+        from .skill_hub import SkillHub
+
+        hub = SkillHub.object_storage_from_config(config)
+        if hub is None:
+            raise ValueError("validation storage requires local/OSS/S3; Nacos stores skills only")
+        store = cls.__new__(cls)
+        store._bucket = hub._bucket
+        store._group_id = str(getattr(config, "sharing_group_id", "default") or "default")
+        return store
 
     def _prefix(self) -> str:
         return f"{self._group_id}/"

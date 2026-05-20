@@ -26,7 +26,7 @@ from typing import Any, Collection, Optional
 
 from evolve_server.core.skill_registry import SkillIDRegistry
 
-from .object_store import build_object_store, is_not_found_error
+from .object_store import build_object_store, is_not_found_error, normalize_backend
 from .skill_bundle import (
     bundle_entrypoint_bytes,
     bundle_file_records,
@@ -92,6 +92,10 @@ class SkillHub:
     @classmethod
     def from_config(cls, config) -> "SkillHub":
         backend = str(getattr(config, "sharing_backend", "") or "").strip().lower()
+        if backend == "nacos":
+            from .nacos_skill_hub import NacosSkillHub
+
+            return NacosSkillHub.from_config(config)
         endpoint = str(getattr(config, "sharing_endpoint", "") or "")
         bucket = str(getattr(config, "sharing_bucket", "") or "")
         access_key_id = str(getattr(config, "sharing_access_key_id", "") or "")
@@ -99,6 +103,48 @@ class SkillHub:
         local_root = str(getattr(config, "sharing_local_root", "") or "")
         return cls(
             backend=backend or ("local" if local_root else "s3" if (bucket or endpoint) else "oss"),
+            endpoint=endpoint,
+            bucket=bucket,
+            access_key_id=access_key_id,
+            secret_access_key=secret_access_key,
+            region=str(getattr(config, "sharing_region", "") or ""),
+            session_token=str(getattr(config, "sharing_session_token", "") or ""),
+            local_root=local_root,
+            group_id=getattr(config, "sharing_group_id", "default"),
+            user_alias=getattr(config, "sharing_user_alias", ""),
+        )
+
+    @classmethod
+    def object_storage_from_config(cls, config) -> Optional["SkillHub"]:
+        """Build the legacy object-store hub for non-skill artifacts.
+
+        ``sharing.backend=nacos`` selects only the Skill registry. Sessions,
+        validation jobs, and other non-skill artifacts must continue to use
+        local/OSS/S3 object storage when that storage is explicitly configured.
+        """
+        sharing_backend = str(getattr(config, "sharing_backend", "") or "").strip().lower()
+        backend = str(getattr(config, "sharing_session_backend", "") or "").strip().lower()
+        if not backend and sharing_backend != "nacos":
+            backend = sharing_backend
+
+        endpoint = str(getattr(config, "sharing_endpoint", "") or "")
+        bucket = str(getattr(config, "sharing_bucket", "") or "")
+        access_key_id = str(getattr(config, "sharing_access_key_id", "") or "")
+        secret_access_key = str(getattr(config, "sharing_secret_access_key", "") or "")
+        local_root = str(getattr(config, "sharing_local_root", "") or "")
+
+        resolved = normalize_backend(backend, endpoint=endpoint, local_root=local_root)
+        if resolved == "nacos":
+            resolved = ""
+        if not resolved and local_root:
+            resolved = "local"
+        if not resolved and sharing_backend != "nacos" and (bucket or endpoint):
+            resolved = "oss" if endpoint and "aliyuncs.com" in endpoint else "s3"
+        if not resolved:
+            return None
+
+        return cls(
+            backend=resolved,
             endpoint=endpoint,
             bucket=bucket,
             access_key_id=access_key_id,

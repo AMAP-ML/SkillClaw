@@ -18,6 +18,7 @@ _DEFAULT_SKILLS_DIR = CONFIG_DIR / "skills"
 _DEFAULT_HERMES_SKILLS_DIR = Path.home() / ".hermes" / "skills"
 _DEFAULT_CODEX_SKILLS_DIR = Path.home() / ".codex" / "skills"
 _DEFAULT_CLAUDE_SKILLS_DIR = Path.home() / ".claude" / "skills"
+_DEFAULT_OPENCODE_SKILLS_DIR = Path.home() / ".config" / "opencode" / "skills"
 
 _DEFAULTS: dict = {
     "llm": {
@@ -155,6 +156,8 @@ def default_skills_dir_for_claw(claw_type: str) -> Path:
         return _DEFAULT_CODEX_SKILLS_DIR
     if normalized == "claude":
         return _DEFAULT_CLAUDE_SKILLS_DIR
+    if normalized == "opencode":
+        return _DEFAULT_OPENCODE_SKILLS_DIR
     return _DEFAULT_SKILLS_DIR
 
 
@@ -171,7 +174,7 @@ def resolve_skills_dir(skills_dir: Any, *, claw_type: str) -> str:
 
     if raw:
         expanded = Path(raw).expanduser()
-        if normalized_claw in {"hermes", "codex", "claude"} and expanded == generic_default:
+        if normalized_claw in {"hermes", "codex", "claude", "opencode"} and expanded == generic_default:
             return str(default_skills_dir_for_claw(normalized_claw))
         return str(expanded)
 

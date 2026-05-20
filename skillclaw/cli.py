@@ -446,6 +446,19 @@ def doctor_claude():
     _echo_report(report)
 
 
+@doctor.command(name="opencode")
+def doctor_opencode():
+    """Inspect the local OpenCode integration state."""
+    from .claw_adapter import inspect_opencode_config
+
+    cs = ConfigStore()
+    if not cs.exists():
+        raise click.ClickException("No config file found. Run 'skillclaw setup' first.")
+
+    report = inspect_opencode_config(cs.to_skillclaw_config())
+    _echo_report(report)
+
+
 @skillclaw.group()
 def restore():
     """Restore agent integration state from backups."""
@@ -509,6 +522,26 @@ def restore_claude(backup_path: str | None):
         raise click.ClickException(str(exc)) from None
 
     click.echo(f"Restored Claude Code settings: {result['target']} <- {result['source']}")
+
+
+@restore.command(name="opencode")
+@click.option(
+    "--backup",
+    "backup_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=str),
+    default=None,
+    help="Restore from a specific backup file instead of the latest OpenCode backup.",
+)
+def restore_opencode(backup_path: str | None):
+    """Restore ~/.config/opencode/opencode.json from a saved backup."""
+    from .claw_adapter import restore_opencode_config
+
+    try:
+        result = restore_opencode_config(Path(backup_path).expanduser() if backup_path else None)
+    except FileNotFoundError as exc:
+        raise click.ClickException(str(exc)) from None
+
+    click.echo(f"Restored OpenCode config: {result['target']} <- {result['source']}")
 
 
 @skillclaw.group()

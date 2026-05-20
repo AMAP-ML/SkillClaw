@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import platform
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -20,9 +21,7 @@ def daemon_start_lock_path() -> Path:
     return _state_dir() / "daemon_start.lock"
 
 
-def process_alive(pid: int) -> bool:
-    if pid <= 0:
-        return False
+def _process_alive_unix(pid: int) -> bool:
     try:
         os.kill(pid, 0)
         return True
@@ -32,6 +31,28 @@ def process_alive(pid: int) -> bool:
         return False
     except OSError:
         return False
+
+
+def _process_alive_windows(pid: int) -> bool:
+    import ctypes
+    kernel32 = ctypes.windll.kernel32
+    PROCESS_QUERY_INFORMATION = 0x0400
+    handle = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, False, pid)
+    if handle:
+        kernel32.CloseHandle(handle)
+        return True
+    return False
+
+
+_USE_WINDOWS = platform.system() == "Windows"
+
+
+def process_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if _USE_WINDOWS:
+        return _process_alive_windows(pid)
+    return _process_alive_unix(pid)
 
 
 def _coerce_pid(value: Any) -> int | None:

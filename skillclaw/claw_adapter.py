@@ -6,7 +6,7 @@ Supported agents:
   openclaw  — runs `openclaw config set …` + `openclaw gateway restart`
   opencode  — patches ~/.config/opencode/opencode.json to register SkillClaw provider
   hermes    — patches ~/.hermes/config.yaml to point model traffic at SkillClaw
-  codex     — patches ~/.codex/config.toml to register SkillClaw as a provider
+  codex     — patches ~/.codex/config.toml to register an opt-in SkillClaw profile
   claude    — patches ~/.claude/settings.json to route Anthropic traffic via SkillClaw
   qwenpaw   — patches QwenPaw model config, selects SkillClaw as active model
   ironclaw  — patches ~/.ironclaw/.env, runs `ironclaw service restart`
@@ -328,6 +328,30 @@ def _upsert_top_level_toml_keys(text: str, updates: dict[str, object]) -> str:
     return "\n".join(merged).rstrip() + "\n"
 
 
+def _remove_top_level_toml_keys(text: str, keys: set[str]) -> str:
+    """Remove selected top-level assignments before the first TOML table."""
+    lines = text.splitlines()
+    first_table_index = len(lines)
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            first_table_index = idx
+            break
+
+    preamble = lines[:first_table_index]
+    remainder = lines[first_table_index:]
+    kept: list[str] = []
+    for line in preamble:
+        stripped = line.strip()
+        if stripped.startswith("#") or "=" not in stripped:
+            kept.append(line)
+            continue
+        key = stripped.split("=", 1)[0].strip()
+        if key not in keys:
+            kept.append(line)
+    return "\n".join(kept + remainder).rstrip() + "\n"
+
+
 def _remove_toml_table(text: str, table_name: str) -> str:
     """Remove a TOML table and its body, if present."""
     lines = text.splitlines()
@@ -630,8 +654,21 @@ def _build_codex_provider_block(base_url: str, api_key: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _build_codex_profile_block(model_id: str) -> str:
+    lines = [
+        "[profiles.skillclaw]",
+        f"model = {_format_toml_value(model_id)}",
+        'model_provider = "skillclaw"',
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def _configure_codex(cfg: "SkillClawConfig") -> None:
-    """Auto-configure Codex CLI to use the SkillClaw proxy."""
+    """Register SkillClaw as an opt-in Codex profile.
+
+    Do not change Codex's global ``model`` / ``model_provider`` defaults.
+    Users opt in explicitly with ``codex --profile skillclaw``.
+    """
     model_id = cfg.served_model_name or cfg.llm_model_id or "skillclaw-model"
     api_key = cfg.proxy_api_key or "skillclaw"
     base_url = f"http://127.0.0.1:{cfg.proxy_port}/v1"
@@ -645,15 +682,13 @@ def _configure_codex(cfg: "SkillClawConfig") -> None:
         except Exception as e:
             logger.warning("[ClawAdapter] Failed to read Codex config %s: %s", config_path, e)
 
-    updated = _upsert_top_level_toml_keys(
-        existing_text,
-        {
-            "model": model_id,
-            "model_provider": "skillclaw",
-        },
-    )
+    updated = existing_text
+    if str(_extract_top_level_toml_value(updated, "model_provider") or "") == "skillclaw":
+        updated = _remove_top_level_toml_keys(updated, {"model", "model_provider"})
     updated = _remove_toml_table(updated, "model_providers.skillclaw").rstrip() + "\n\n"
+    updated = _remove_toml_table(updated, "profiles.skillclaw").rstrip() + "\n\n"
     updated += _build_codex_provider_block(base_url, api_key)
+    updated += "\n" + _build_codex_profile_block(model_id)
 
     _backup_codex_config_if_changed(config_path, updated)
     _write_text_atomic(config_path, updated, "Codex config")
@@ -683,10 +718,13 @@ def inspect_codex_config(cfg: "SkillClawConfig") -> dict[str, object]:
     configured_base_url = str(provider_cfg.get("base_url") or "")
     configured_wire_api = str(provider_cfg.get("wire_api") or "")
     configured_token = str(provider_cfg.get("experimental_bearer_token") or "")
+    profile_cfg = _extract_toml_table(text, "profiles.skillclaw")
+    configured_profile_model = str(profile_cfg.get("model") or "")
+    configured_profile_provider = str(profile_cfg.get("model_provider") or "")
 
     proxy_match = (
-        configured_model == expected_model
-        and configured_provider == "skillclaw"
+        configured_profile_model == expected_model
+        and configured_profile_provider == "skillclaw"
         and configured_base_url == expected_base_url
         and configured_wire_api == "responses"
         and configured_token == expected_api_key
@@ -696,7 +734,8 @@ def inspect_codex_config(cfg: "SkillClawConfig") -> dict[str, object]:
     skills_dir_match = configured_skillclaw_skills_dir == expected_skills_dir
     issues: list[str] = []
     notes: list[str] = [
-        "Codex uses the OpenAI Responses-compatible SkillClaw endpoint via `model_providers.skillclaw`.",
+        "Codex can opt into SkillClaw with `codex --profile skillclaw`.",
+        "SkillClaw registers a Codex profile and does not change Codex's global model defaults.",
         "Codex session boundaries fall back to proxy-side heuristics because"
         " Codex does not send SkillClaw session headers.",
     ]
@@ -705,8 +744,11 @@ def inspect_codex_config(cfg: "SkillClawConfig") -> dict[str, object]:
     if not config_path.exists():
         issues.append("Codex config is missing: ~/.codex/config.toml")
     if not proxy_match:
-        issues.append("Codex model routing is not pointing at the local SkillClaw proxy.")
-        next_steps.append("Start SkillClaw once with `claw_type=codex` so it can rewrite ~/.codex/config.toml.")
+        issues.append("Codex SkillClaw profile is missing or not pointing at the local SkillClaw proxy.")
+        next_steps.append("Start SkillClaw once with `claw_type=codex` so it can register ~/.codex/config.toml.")
+    if configured_provider == "skillclaw":
+        issues.append("Codex global model_provider still points at SkillClaw; normal Codex runs may be intercepted.")
+        next_steps.append("Remove top-level `model_provider = \"skillclaw\"` or run `skillclaw restore codex`.")
     if not expected_skills_dir.is_dir():
         issues.append(f"Codex skills directory is missing: {expected_skills_dir}")
         next_steps.append(f"Create or prepare the Codex skills directory: {expected_skills_dir}")
@@ -723,9 +765,12 @@ def inspect_codex_config(cfg: "SkillClawConfig") -> dict[str, object]:
         "status": "ok" if not issues else "warning",
         "config_path": str(config_path),
         "config_exists": config_path.exists(),
-        "integration_scope": "codex-only",
+        "integration_scope": "codex-profile-only",
         "expected_model": expected_model,
         "configured_model": configured_model or "(unset)",
+        "expected_profile": "skillclaw",
+        "configured_profile_model": configured_profile_model or "(unset)",
+        "configured_profile_provider": configured_profile_provider or "(unset)",
         "expected_base_url": expected_base_url,
         "configured_base_url": configured_base_url or "(unset)",
         "configured_provider": configured_provider or "(unset)",

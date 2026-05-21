@@ -3,8 +3,26 @@ from __future__ import annotations
 from pathlib import Path
 
 from skillclaw import claw_adapter
+from skillclaw.api_server import SkillClawAPIServer
 from skillclaw.config import SkillClawConfig
 from skillclaw.config_store import ConfigStore
+
+
+class FakeSkillManager:
+    def __init__(self) -> None:
+        self.injected = []
+
+    def refresh_if_changed(self) -> None:
+        return None
+
+    def build_injection_prompt(self, max_chars: int = 30_000) -> str:
+        return "<available_skills><skill><name>demo</name></skill></available_skills>"
+
+    def get_all_skills(self) -> list[dict]:
+        return [{"name": "demo"}]
+
+    def record_injection(self, names: list[str]) -> None:
+        self.injected.append(list(names))
 
 
 def test_configure_codex_registers_profile_without_replacing_global_defaults(monkeypatch, tmp_path: Path) -> None:
@@ -74,3 +92,26 @@ def test_codex_config_defaults_to_responses_mode_and_codex_skills(tmp_path: Path
 
     assert cfg.llm_api_mode == "responses"
     assert cfg.skills_dir.endswith(".codex/skills")
+
+
+def test_native_responses_body_injects_skills_without_dropping_codex_tools() -> None:
+    server = object.__new__(SkillClawAPIServer)
+    server.config = SkillClawConfig(max_skills_prompt_chars=10_000)
+    server.skill_manager = FakeSkillManager()
+    custom_tool = {"type": "custom", "name": "apply_patch"}
+    namespace_tool = {"type": "namespace", "name": "mcp__github__"}
+    body = {
+        "instructions": "base instructions",
+        "input": "hi",
+        "tools": [custom_tool, namespace_tool],
+        "tool_choice": {"type": "custom", "name": "apply_patch"},
+    }
+
+    prepared = server._prepare_native_responses_body(body, turn_type="main")
+
+    assert prepared is not body
+    assert prepared["tools"] == [custom_tool, namespace_tool]
+    assert prepared["tool_choice"] == {"type": "custom", "name": "apply_patch"}
+    assert prepared["instructions"].startswith("base instructions")
+    assert "<available_skills>" in prepared["instructions"]
+    assert server.skill_manager.injected == [["demo"]]

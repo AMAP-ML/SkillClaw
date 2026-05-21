@@ -1623,6 +1623,8 @@ class SkillClawAPIServer:
 
             body = await request.json()
             if owner._responses_native_enabled():
+                turn_type = _resolve_turn_type(x_turn_type, body.get("turn_type"), default="main")
+                body = owner._prepare_native_responses_body(body, turn_type=turn_type)
                 if bool(body.get("stream", False)):
                     return StreamingResponse(
                         owner._stream_llm_responses(body),
@@ -2580,6 +2582,36 @@ class SkillClawAPIServer:
         if self.config.llm_api_key:
             headers["Authorization"] = f"Bearer {self.config.llm_api_key}"
         return f"{api_base}/responses", send_body, headers
+
+    def _prepare_native_responses_body(self, body: dict[str, Any], *, turn_type: str) -> dict[str, Any]:
+        """Apply non-destructive SkillClaw hooks before native Responses forwarding."""
+        prepared = dict(body)
+        if not self.skill_manager or turn_type != "main":
+            return prepared
+
+        try:
+            self.skill_manager.refresh_if_changed()
+        except Exception as e:
+            logger.warning("[SkillManager] failed to refresh local skills: %s", e)
+
+        skill_text = self.skill_manager.build_injection_prompt(
+            max_chars=getattr(self.config, "max_skills_prompt_chars", 30_000),
+        )
+        if not skill_text:
+            return prepared
+
+        all_skills = self.skill_manager.get_all_skills()
+        skill_names = [s.get("name", "unknown_skill") for s in all_skills if isinstance(s, dict)]
+        logger.info(
+            "[SkillManager] listing %d skills in Codex Responses instructions: %s",
+            len(skill_names),
+            ", ".join(skill_names)[:400],
+        )
+        self.skill_manager.record_injection(skill_names)
+
+        existing = _normalize_responses_content(prepared.get("instructions", ""))
+        prepared["instructions"] = (existing + "\n\n" + skill_text).strip() if existing else skill_text
+        return prepared
 
     async def _forward_to_llm_responses(self, body: dict[str, Any]) -> dict[str, Any]:
         """Forward a Codex Responses payload to an upstream Responses API."""

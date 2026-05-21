@@ -4,6 +4,7 @@ from pathlib import Path
 
 from skillclaw import claw_adapter
 from skillclaw.config import SkillClawConfig
+from skillclaw.config_store import ConfigStore
 
 
 def test_configure_codex_registers_profile_without_replacing_global_defaults(monkeypatch, tmp_path: Path) -> None:
@@ -55,3 +56,21 @@ def test_configure_codex_removes_legacy_global_skillclaw_defaults(monkeypatch, t
     assert "model_provider" not in top_level
     assert "model =" not in top_level
     assert "[profiles.skillclaw]" in config_path.read_text(encoding="utf-8")
+
+
+def test_codex_config_defaults_to_responses_mode_and_codex_skills(tmp_path: Path) -> None:
+    store = ConfigStore(tmp_path / "config.yaml")
+    store.save(
+        {
+            "claw_type": "codex",
+            "llm": {"provider": "openai", "api_base": "http://upstream.test/v1", "model_id": "upstream"},
+            "proxy": {"served_model_name": "skillclaw-model"},
+            "skills": {"enabled": True},
+            "prm": {"enabled": False},
+        }
+    )
+
+    cfg = store.to_skillclaw_config()
+
+    assert cfg.llm_api_mode == "responses"
+    assert cfg.skills_dir.endswith(".codex/skills")

@@ -211,7 +211,7 @@ skillclaw setup
 第一次最小化验证时，推荐这样选：
 
 - `CLI agent` 选 `none`，先不要自动改外部 agent 配置
-- `skills` 目录保持默认值 `~/.skillclaw/skills`；如果你选了 Hermes，默认技能库会变成 `~/.hermes/skills`
+- `skills` 目录保持默认值 `~/.skillclaw/skills`；如果你选了 Hermes、Codex 或 Claude Code，默认技能库会变成 `~/.hermes/skills`、`~/.codex/skills` 或 `~/.claude/skills`
 - 如果你只是想先验证代理能不能正常用，可以先关闭 shared storage
 - 如果你后面想在同一台机器上继续跑本地 evolver 闭环，就把 shared storage 打开并选 `local` backend，例如 `~/.skillclaw/local-share`
 - 如果你想先把成本压到最低，可以先关闭 PRM

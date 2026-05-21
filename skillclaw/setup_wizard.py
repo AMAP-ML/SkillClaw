@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .claw_adapter import CLAW_TYPES
-from .config_store import CONFIG_DIR, ConfigStore, resolve_skills_dir
+from .config_store import CONFIG_DIR, ConfigStore, default_llm_api_mode_for_claw, resolve_skills_dir
 
 _PROVIDER_PRESETS = {
     "kimi": {
@@ -202,7 +202,13 @@ class SetupWizard:
                 f"Recommended directory: {default_skills_dir}"
             )
         elif claw_type == "codex":
-            print(f"Codex reads native skills from ~/.codex/skills.\nRecommended directory: {default_skills_dir}")
+            print(
+                "Codex will get a SkillClaw profile without changing its global defaults.\n"
+                "After starting SkillClaw, run: codex --profile skillclaw\n"
+                "Normal `codex` runs remain unchanged.\n"
+                "Codex reads native skills from ~/.codex/skills.\n"
+                f"Recommended directory: {default_skills_dir}"
+            )
         elif claw_type == "claude":
             print(
                 f"Claude Code reads native skills from ~/.claude/skills.\nRecommended directory: {default_skills_dir}"
@@ -343,7 +349,8 @@ class SetupWizard:
         proxy_config["port"] = proxy_port
         proxy_config.setdefault("host", "0.0.0.0")
         proxy_config["served_model_name"] = served_model_name or "skillclaw-model"
-        llm_api_mode = str(current_llm.get("api_mode", "chat") or "chat")
+        default_api_mode = default_llm_api_mode_for_claw(claw_type)
+        llm_api_mode = str(current_llm.get("api_mode", default_api_mode) or default_api_mode)
         data = {
             "claw_type": claw_type,
             "llm": {
@@ -375,4 +382,7 @@ class SetupWizard:
 
         print(f"\nConfig saved to: {cs.config_file}")
         print("\nRun 'skillclaw start' to launch SkillClaw.")
+        if claw_type == "codex":
+            print("Then run 'codex --profile skillclaw' to use Codex through SkillClaw.")
+            print("Use 'skillclaw doctor codex' if the profile does not work as expected.")
         print("=" * 60 + "\n")

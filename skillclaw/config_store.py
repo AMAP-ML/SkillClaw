@@ -19,6 +19,10 @@ _DEFAULT_HERMES_SKILLS_DIR = Path.home() / ".hermes" / "skills"
 _DEFAULT_CODEX_SKILLS_DIR = Path.home() / ".codex" / "skills"
 _DEFAULT_CLAUDE_SKILLS_DIR = Path.home() / ".claude" / "skills"
 _DEFAULT_OPENCODE_SKILLS_DIR = Path.home() / ".config" / "opencode" / "skills"
+_DEFAULT_LLM_API_MODE_BY_CLAW = {
+    "codex": "responses",
+}
+_FALLBACK_LLM_API_MODE = "chat"
 
 _DEFAULTS: dict = {
     "llm": {
@@ -161,6 +165,12 @@ def default_skills_dir_for_claw(claw_type: str) -> Path:
     return _DEFAULT_SKILLS_DIR
 
 
+def default_llm_api_mode_for_claw(claw_type: str) -> str:
+    """Return the default upstream API mode for the selected agent."""
+    normalized = str(claw_type or "").strip().lower()
+    return _DEFAULT_LLM_API_MODE_BY_CLAW.get(normalized, _FALLBACK_LLM_API_MODE)
+
+
 def resolve_skills_dir(skills_dir: Any, *, claw_type: str) -> str:
     """Normalize a configured skills dir, applying agent-native defaults.
 
@@ -254,13 +264,14 @@ class ConfigStore:
         llm_api_base = llm.get("api_base", "")
         llm_api_key = llm.get("api_key", "")
         llm_model_id = llm.get("model_id", "")
-        llm_api_mode = str(llm.get("api_mode", "chat") or "chat")
+        raw_claw_type = str(data.get("claw_type", "openclaw") or "openclaw")
+        default_api_mode = default_llm_api_mode_for_claw(raw_claw_type)
+        llm_api_mode = str(llm.get("api_mode", default_api_mode) or default_api_mode)
         proxy = data.get("proxy", {})
         skills = data.get("skills", {})
         orouter = data.get("openrouter", {})
         prm = data.get("prm", {})
         configure_openclaw = bool(data.get("configure_openclaw", True))
-        raw_claw_type = str(data.get("claw_type", "openclaw") or "openclaw")
         if not configure_openclaw:
             raw_claw_type = "none"
 

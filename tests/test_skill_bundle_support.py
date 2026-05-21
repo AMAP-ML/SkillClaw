@@ -375,3 +375,37 @@ def test_hermes_skill_tool_attribution_uses_bundle_child_paths(tmp_path: Path) -
         "path": script_path,
         "action": "skill_manage",
     }]
+
+
+def test_claude_code_skill_tool_detected(tmp_path: Path) -> None:
+    import json
+
+    from skillclaw.api_server import _extract_read_skills_from_tool_calls
+    from skillclaw.skill_manager import SkillManager
+
+    skills_dir = tmp_path / "skills"
+    _write_bytes(skills_dir / "evolve-demo" / "SKILL.md", _skill_md("evolve-demo").encode("utf-8"))
+
+    manager = SkillManager(str(skills_dir))
+    skill_path_map = manager.get_skill_path_map()
+    skill_id = manager.get_all_skills()[0]["id"]
+    evolve_paths = [
+        p for p, info in skill_path_map.items() if info.get("skill_name") == "evolve-demo"
+    ]
+
+    skill_calls = [
+        {
+            "function": {
+                "name": "Skill",
+                "arguments": json.dumps({"skill": "evolve-demo", "args": "some args"}),
+            }
+        }
+    ]
+
+    read_skills = _extract_read_skills_from_tool_calls(skill_calls, skill_path_map)
+
+    assert read_skills == [{
+        "skill_id": skill_id,
+        "skill_name": "evolve-demo",
+        "path": evolve_paths[0],
+    }]

@@ -113,6 +113,7 @@ _VALID_TURN_TYPES = {"main", "side"}
 _TRUE_STRINGS = {"1", "true", "yes", "on"}
 _READ_TOOL_NAMES = {"read", "file_read", "read_file", "readfile"}
 _HERMES_SKILL_READ_TOOL_NAMES = {"skill_view"}
+_CLAUDE_CODE_SKILL_TOOL_NAMES = {"skill"}
 _SKILL_WRITE_TOOL_NAMES = {
     "write",
     "file_write",
@@ -876,6 +877,14 @@ def _extract_read_skills_from_tool_calls(
         tool_name, skill_paths = _extract_skill_paths_from_tool_call(tc)
         normalized = tool_name.lower()
         if normalized in _HERMES_SKILL_READ_TOOL_NAMES:
+            _, skill_name, rel_path = _extract_hermes_skill_name_from_tool_call(tc)
+            skill_ref = _resolve_skill_reference_by_name(skill_name, skill_path_map, rel_path)
+            dedupe_key = skill_ref.get("skill_id") or skill_ref.get("skill_name")
+            if dedupe_key and dedupe_key not in seen_ids:
+                read_skills.append(skill_ref)
+                seen_ids.add(dedupe_key)
+            continue
+        if normalized in _CLAUDE_CODE_SKILL_TOOL_NAMES:
             _, skill_name, rel_path = _extract_hermes_skill_name_from_tool_call(tc)
             skill_ref = _resolve_skill_reference_by_name(skill_name, skill_path_map, rel_path)
             dedupe_key = skill_ref.get("skill_id") or skill_ref.get("skill_name")

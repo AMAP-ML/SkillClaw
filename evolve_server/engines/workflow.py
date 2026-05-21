@@ -14,20 +14,16 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import logging
-import os
-import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from skillclaw.object_store import build_object_store
 from skillclaw.skill_bundle import bundle_tree_sha256
 from skillclaw.validation_store import ValidationStore
 
 from ..core.config import EvolveServerConfig
-from ..core.constants import NO_SKILL_KEY, SLUG_RE, DecisionAction
+from ..core.constants import NO_SKILL_KEY, DecisionAction
 from ..core.llm_client import AsyncLLMClient
 from ..core.skill_registry import SkillIDRegistry
 from ..core.utils import build_skill_md, parse_skill_content
@@ -45,16 +41,15 @@ from ..storage.oss_helpers import (
     delete_session_keys,
     fetch_skill_content,
     list_session_keys,
-    load_manifest,
-    read_json_object,
     save_manifest,
     save_version_bundle,
 )
+from .common import EvolveEngineMixin
 
 logger = logging.getLogger(__name__)
 
 
-class EvolveServer:
+class EvolveServer(EvolveEngineMixin):
     """Session-level evolve server backed by shared object storage."""
 
     def __init__(
@@ -66,7 +61,7 @@ class EvolveServer:
     ) -> None:
         self.config = config
         self._mock = mock
-        self._bucket = self._build_bucket(mock=mock, mock_root=mock_root)
+        self._bucket = self._build_bucket(config, mock=mock, mock_root=mock_root)
         self._prefix = f"{config.group_id}/"
         self._llm = AsyncLLMClient(
             api_key=config.llm_api_key,
@@ -92,62 +87,6 @@ class EvolveServer:
         set_evolve_debug_dir(config.debug_dump_dir)
         set_summarizer_debug_dir(config.debug_dump_dir)
         self._id_registry.load_from_oss(self._bucket, self._prefix)
-
-    def _build_bucket(self, *, mock: bool, mock_root: str | None):
-        if mock:
-            from ..storage.mock_bucket import LocalBucket
-
-            return LocalBucket(root=mock_root)
-        return build_object_store(
-            backend=self.config.storage_backend,
-            endpoint=self.config.storage_endpoint,
-            bucket=self.config.storage_bucket,
-            access_key_id=self.config.storage_access_key_id,
-            secret_access_key=self.config.storage_secret_access_key,
-            region=self.config.storage_region,
-            session_token=self.config.storage_session_token,
-            local_root=self.config.local_root,
-        )
-
-    def _uses_local_storage(self) -> bool:
-        backend = str(self.config.storage_backend or "").strip().lower()
-        if backend == "local" or self._mock:
-            return True
-        bucket_type = type(self._bucket).__name__.lower()
-        return "local" in bucket_type and bool(self.config.local_root)
-
-    async def _call_storage(self, func, *args):
-        if self._uses_local_storage():
-            return func(*args)
-        return await asyncio.to_thread(func, *args)
-
-    def _append_history(self, record: dict) -> None:
-        path = self.config.history_path
-        try:
-            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-            with open(path, "a", encoding="utf-8") as handle:
-                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-        except Exception as exc:
-            logger.warning("[EvolveServer] history write failed: %s", exc)
-
-    async def _drain_sessions(self) -> tuple[list[dict], list[str]]:
-        keys = await self._call_storage(list_session_keys, self._bucket, self._prefix)
-        sessions: list[dict] = []
-        consumed_keys: list[str] = []
-        for key in keys:
-            session = await self._call_storage(read_json_object, self._bucket, key)
-            if session:
-                sessions.append(session)
-                consumed_keys.append(key)
-        logger.info(
-            "[EvolveServer] drained %d session(s) from queue (%d keys found)",
-            len(sessions),
-            len(keys),
-        )
-        return sessions, consumed_keys
-
-    def _load_remote_skills(self) -> dict[str, dict[str, Any]]:
-        return load_manifest(self._bucket, self._prefix)
 
     def _load_remote_skill_record(self, name: str) -> Optional[dict[str, Any]]:
         rec = self._load_remote_skills().get(name)
@@ -896,11 +835,3 @@ class EvolveServer:
             return {"status": "ok"}
 
         return app
-
-    @staticmethod
-    def _sanitise_name(raw_name: str) -> str:
-        name = raw_name.strip().lower()
-        if SLUG_RE.match(name):
-            return name
-        name = re.sub(r"[^a-z0-9_-]", "-", name).strip("-")
-        return name or "unnamed-skill"

@@ -6,16 +6,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import logging
 import os
-import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from skillclaw.object_store import build_object_store
 from skillclaw.skill_bundle import (
     bundle_entrypoint_bytes,
     bundle_file_records,
@@ -23,7 +20,6 @@ from skillclaw.skill_bundle import (
 )
 
 from ..core.config import EvolveServerConfig
-from ..core.constants import SLUG_RE
 from ..core.llm_client import AsyncLLMClient
 from ..core.skill_registry import SkillIDRegistry
 from ..core.utils import build_skill_md
@@ -32,19 +28,17 @@ from ..pipeline.summarizer import (
     build_session_trajectory,
     summarize_sessions_parallel,
 )
-from ..storage.mock_bucket import LocalBucket
 from ..storage.oss_helpers import (
     delete_session_keys,
     fetch_skill_bundle,
     list_object_keys,
     list_session_keys,
-    load_manifest,
-    read_json_object,
     save_manifest,
     save_version_bundle,
 )
 from .agent_workspace import AgentWorkspace
 from .agents_md import load_agents_md
+from .common import EvolveEngineMixin
 from .openclaw_runner import OpenClawRunner
 
 logger = logging.getLogger(__name__)
@@ -136,7 +130,7 @@ class _AnthropicMessagesLLMClient:
                     raise
 
 
-class AgentEvolveServer:
+class AgentEvolveServer(EvolveEngineMixin):
     """Agent-driven evolution server.
 
     Parameters
@@ -158,21 +152,8 @@ class AgentEvolveServer:
     ) -> None:
         self.config = config
         self._mock = mock
-
-        if mock:
-            default_mock = str(Path(__file__).resolve().parent / "mock")
-            self._bucket = LocalBucket(root=mock_root or default_mock)
-        else:
-            self._bucket = build_object_store(
-                backend=config.storage_backend,
-                endpoint=config.storage_endpoint,
-                bucket=config.storage_bucket,
-                access_key_id=config.storage_access_key_id,
-                secret_access_key=config.storage_secret_access_key,
-                region=config.storage_region,
-                session_token=config.storage_session_token,
-                local_root=config.local_root,
-            )
+        default_mock = str(Path(__file__).resolve().parent / "mock") if mock and mock_root is None else mock_root
+        self._bucket = self._build_bucket(config, mock=mock, mock_root=default_mock)
 
         self._prefix = f"{config.group_id}/"
         self._id_registry = SkillIDRegistry()
@@ -231,53 +212,9 @@ class AgentEvolveServer:
             session["_trajectory"] = build_session_trajectory(session)
             session["_summary"] = ""
 
-    def _uses_local_storage(self) -> bool:
-        backend = str(self.config.storage_backend or "").strip().lower()
-        if backend == "local" or self._mock:
-            return True
-        bucket_type = type(self._bucket).__name__.lower()
-        return "local" in bucket_type and bool(self.config.local_root)
-
-    async def _call_storage(self, func, *args):
-        if self._uses_local_storage():
-            return func(*args)
-        return await asyncio.to_thread(func, *args)
-
-    # ================================================================= #
-    #  History                                                           #
-    # ================================================================= #
-
-    def _append_history(self, record: dict) -> None:
-        path = self.config.history_path
-        try:
-            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-            with open(path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
-        except Exception as e:
-            logger.warning("[AgentEvolveServer] history write failed: %s", e)
-
     # ================================================================= #
     #  Storage data access                                               #
     # ================================================================= #
-
-    async def _drain_sessions(self) -> tuple[list[dict], list[str]]:
-        keys = await self._call_storage(list_session_keys, self._bucket, self._prefix)
-        sessions: list[dict] = []
-        consumed_keys: list[str] = []
-        for key in keys:
-            session = await self._call_storage(read_json_object, self._bucket, key)
-            if session:
-                sessions.append(session)
-                consumed_keys.append(key)
-        logger.info(
-            "[AgentEvolveServer] drained %d session(s) (%d keys found)",
-            len(sessions),
-            len(keys),
-        )
-        return sessions, consumed_keys
-
-    def _load_remote_skills(self) -> dict[str, dict[str, Any]]:
-        return load_manifest(self._bucket, self._prefix)
 
     def _fetch_all_skills(self, manifest: dict[str, dict]) -> dict[str, dict[str, bytes]]:
         """Fetch full bundle content for all skills in the manifest."""
@@ -585,17 +522,3 @@ class AgentEvolveServer:
             return {"status": "ok"}
 
         return app
-
-    # ================================================================= #
-    #  Internal helpers                                                  #
-    # ================================================================= #
-
-    @staticmethod
-    def _sanitise_name(raw_name: str) -> str:
-        name = raw_name.strip().lower()
-        if SLUG_RE.match(name):
-            return name
-        name = re.sub(r"[^a-z0-9_-]", "-", name).strip("-")
-        if not name:
-            name = "unnamed-skill"
-        return name

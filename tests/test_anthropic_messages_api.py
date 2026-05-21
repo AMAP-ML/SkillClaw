@@ -9,8 +9,7 @@ from skillclaw.config import SkillClawConfig
 
 
 @pytest.fixture
-def anthropic_server(monkeypatch, tmp_path):
-    monkeypatch.setattr(SkillClawAPIServer, "_load_tokenizer", lambda self: None)
+def anthropic_server(tmp_path):
     return SkillClawAPIServer(
         SkillClawConfig(
             proxy_api_key="skillclaw",
@@ -43,14 +42,6 @@ async def test_anthropic_count_tokens_endpoint_returns_local_estimate(anthropic_
 
 @pytest.mark.asyncio
 async def test_anthropic_count_tokens_accounts_for_image_content(anthropic_server):
-    class FakeTokenizer:
-        def apply_chat_template(self, messages, tools=None, tokenize=False, add_generation_prompt=False):
-            return "user: screenshot"
-
-        def __call__(self, text, add_special_tokens=False):
-            return {"input_ids": [1, 2, 3]}
-
-    anthropic_server._tokenizer = FakeTokenizer()
     png_header = (
         b"\x89PNG\r\n\x1a\n"
         + struct.pack(">I", 13)

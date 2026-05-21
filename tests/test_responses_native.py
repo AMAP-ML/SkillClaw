@@ -223,8 +223,7 @@ async def test_responses_endpoint_passthroughs_native_stream():
 
 
 @pytest.mark.asyncio
-async def test_responses_chat_bridge_merges_previous_response_history(monkeypatch, tmp_path):
-    monkeypatch.setattr(SkillClawAPIServer, "_load_tokenizer", lambda self: None)
+async def test_responses_chat_bridge_merges_previous_response_history(tmp_path):
     server = SkillClawAPIServer(
         SkillClawConfig(
             proxy_api_key="skillclaw",
@@ -280,8 +279,7 @@ async def test_responses_chat_bridge_merges_previous_response_history(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_responses_continuation_keeps_new_instructions_first(monkeypatch, tmp_path):
-    monkeypatch.setattr(SkillClawAPIServer, "_load_tokenizer", lambda self: None)
+async def test_responses_continuation_keeps_new_instructions_first(tmp_path):
     server = SkillClawAPIServer(
         SkillClawConfig(
             proxy_api_key="skillclaw",
@@ -339,8 +337,7 @@ async def test_responses_continuation_keeps_new_instructions_first(monkeypatch, 
 
 
 @pytest.mark.asyncio
-async def test_responses_continuation_deduplicates_replayed_output_items(monkeypatch, tmp_path):
-    monkeypatch.setattr(SkillClawAPIServer, "_load_tokenizer", lambda self: None)
+async def test_responses_continuation_deduplicates_replayed_output_items(tmp_path):
     server = SkillClawAPIServer(
         SkillClawConfig(
             proxy_api_key="skillclaw",

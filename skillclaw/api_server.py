@@ -20,7 +20,6 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from itertools import count
 from typing import Any, Optional
 
 import uvicorn
@@ -28,7 +27,6 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from .config import SkillClawConfig
-from .data_formatter import ConversationSample
 from .prm_scorer import PRMScorer
 from .protocols import anthropic_messages as anthropic_protocol
 from .protocols import openai_responses as responses_protocol
@@ -1027,16 +1025,6 @@ def _merge_tool_error_info(
     ]
 
 
-def _extract_logprobs_from_chat_response(choice: dict[str, Any]) -> list[float]:
-    logprobs_obj = choice.get("logprobs")
-    if not isinstance(logprobs_obj, dict):
-        return []
-    content = logprobs_obj.get("content")
-    if not isinstance(content, list):
-        return []
-    return [float(item.get("logprob", 0.0)) for item in content if isinstance(item, dict)]
-
-
 def _rewrite_new_session_bootstrap_prompt(messages: list[dict]) -> tuple[list[dict], int]:
     """Rewrite OpenClaw /new bootstrap user prompt to a safer variant.
 
@@ -1227,24 +1215,16 @@ def _token_estimate_text(content: Any) -> str:
     return str(content) if content is not None else ""
 
 
-def _estimate_openai_body_input_tokens(tokenizer: Any, openai_body: dict[str, Any]) -> int:
+def _estimate_openai_body_input_tokens(openai_body: dict[str, Any]) -> int:
+    """Return a provider-agnostic rough input token estimate.
+
+    SkillClaw proxies external agents and does not own the upstream model's
+    exact tokenization. Keep this estimate local and dependency-free so
+    daemon readiness never depends on model-specific tokenization.
+    """
     messages = list(openai_body.get("messages") or [])
     tools = openai_body.get("tools")
     image_tokens = sum(_estimate_image_content_tokens(msg.get("content")) for msg in messages if isinstance(msg, dict))
-    if tokenizer is not None:
-        try:
-            text = tokenizer.apply_chat_template(
-                _normalize_messages_for_template(messages),
-                tools=tools if tools else None,
-                tokenize=False,
-                add_generation_prompt=True,
-            )
-            tokenized = tokenizer(text, add_special_tokens=False)
-            input_ids = tokenized["input_ids"] if isinstance(tokenized, dict) else tokenized.input_ids
-            return max(0, len(input_ids) + image_tokens)
-        except Exception:
-            pass
-
     text_parts = []
     for msg in messages:
         if not isinstance(msg, dict):
@@ -1416,7 +1396,7 @@ class SkillClawAPIServer:
     skill_manager:
         Optional SkillManager for injecting skills into system prompts.
     prm_scorer:
-        Optional PRMScorer. If None, all samples get reward=0.
+        Optional PRMScorer for turn feedback.
     """
 
     def __init__(
@@ -1446,13 +1426,11 @@ class SkillClawAPIServer:
         self._system_prompt_cache_file = os.path.join(config.record_dir, f"system_prompt_cache_{cache_suffix}.json")
 
         # State machines
-        self._index_counter = count(0)
-        self._group_counter = count(0)
         self._turn_counts: dict[str, int] = {}
         self._pending_turn_data: dict[str, dict[int, dict]] = {}  # session → {turn → data}
         self._prm_tasks: dict[str, dict[int, asyncio.Task]] = {}  # session → {turn → task}
         self._pending_records: dict[str, dict] = {}  # for record logging
-        self._session_effective: dict[str, int] = {}  # at-least-one guarantee
+        self._session_scored_turns: dict[str, int] = {}  # session -> finalized PRM turn count
         self._session_turns: dict[str, list] = {}
         self._session_last_active: dict[str, float] = {}  # session -> unix_ts
         self._closing_sessions: set[str] = set()  # session ids currently being closed
@@ -1490,9 +1468,6 @@ class SkillClawAPIServer:
             with open(self._prm_record_file, "w"):
                 pass
 
-        # Tokenizer is used for prompt length accounting/truncation and for
-        # optional tokenized conversation sample export.
-        self._tokenizer = self._load_tokenizer()
         self.app = self._build_app()
 
         # Threading lifecycle (set by start())
@@ -1500,19 +1475,6 @@ class SkillClawAPIServer:
         self._thread: Optional[threading.Thread] = None
         self._ready_event = threading.Event()
         self._server_stopped_event = threading.Event()
-
-    # ------------------------------------------------------------------ #
-    # Tokenizer                                                            #
-    # ------------------------------------------------------------------ #
-
-    def _load_tokenizer(self):
-        try:
-            from transformers import AutoTokenizer
-
-            return AutoTokenizer.from_pretrained(self.config.model_name, trust_remote_code=True)
-        except Exception as e:
-            logger.warning("[OpenClaw] could not load tokenizer: %s", e)
-            return None
 
     # ------------------------------------------------------------------ #
     # FastAPI app                                                          #
@@ -1734,7 +1696,7 @@ class SkillClawAPIServer:
 
             raw_body = await request.json()
             openai_body = _anthropic_to_openai_body(raw_body)
-            input_tokens = _estimate_openai_body_input_tokens(owner._tokenizer, openai_body)
+            input_tokens = _estimate_openai_body_input_tokens(openai_body)
             return JSONResponse(content={"input_tokens": input_tokens})
 
         @app.post("/v1/messages")
@@ -1899,7 +1861,7 @@ class SkillClawAPIServer:
         session_ids.update(self._session_turns.keys())
         session_ids.update(self._pending_turn_data.keys())
         session_ids.update(self._turn_counts.keys())
-        session_ids.update(self._session_effective.keys())
+        session_ids.update(self._session_scored_turns.keys())
         session_ids.update(self._prm_tasks.keys())
         return sorted(s for s in session_ids if s and s not in self._closing_sessions)
 
@@ -1973,7 +1935,7 @@ class SkillClawAPIServer:
         await self._await_background_tasks(self._shutdown_drain_timeout_seconds)
 
     async def _close_session(self, session_id: str, reason: str = "explicit") -> None:
-        """Flush a session: submit remaining samples, upload session data, clean up state."""
+        """Flush a session: finalize pending turn feedback, upload session data, clean up state."""
         if not session_id:
             return
         if session_id in self._closing_sessions:
@@ -1981,35 +1943,51 @@ class SkillClawAPIServer:
         self._closing_sessions.add(session_id)
         try:
             self._flush_pending_record(session_id, None)
-            pending_snapshot = {
-                turn_num: dict(turn_data) for turn_num, turn_data in self._pending_turn_data.get(session_id, {}).items()
-            }
-            self._maybe_submit_ready_samples(session_id, force_last_prm=True)
-            prm_tasks = list(self._prm_tasks.get(session_id, {}).values())
-            if prm_tasks:
+            pending = self._pending_turn_data.get(session_id, {})
+            prm_tasks = self._prm_tasks.setdefault(session_id, {})
+            if self.config.use_prm and self.prm_scorer:
+                for turn_num, turn_data in list(pending.items()):
+                    if turn_num in prm_tasks:
+                        continue
+                    prm_task = asyncio.create_task(
+                        self.prm_scorer.evaluate(
+                            turn_data.get("response_text", ""),
+                            turn_data.get("prompt_text", ""),
+                            session_id=session_id,
+                            turn_num=turn_num,
+                        )
+                    )
+                    prm_task.add_done_callback(self._task_done_cb)
+                    prm_task.add_done_callback(
+                        lambda _t, sid=session_id, tnum=turn_num: self._on_prm_done_record_only(sid, tnum, _t)
+                    )
+                    prm_tasks[turn_num] = prm_task
+            active_prm_tasks = list(prm_tasks.values())
+            if active_prm_tasks:
                 try:
                     await asyncio.wait_for(
-                        asyncio.gather(*prm_tasks, return_exceptions=True),
+                        asyncio.gather(*active_prm_tasks, return_exceptions=True),
                         timeout=_SHUTDOWN_DRAIN_TIMEOUT_SECONDS,
                     )
                 except asyncio.TimeoutError:
                     logger.warning("[SessionDetect] PRM drain timed out for session=%s", session_id)
-            for turn_num in sorted(pending_snapshot.keys()):
-                turn_data = pending_snapshot[turn_num]
+            for turn_num in sorted(list(pending.keys())):
+                turn_data = pending.pop(turn_num)
                 prm_result = turn_data.pop("prm_result", None)
-                prm_task = self._prm_tasks.get(session_id, {}).get(turn_num)
+                prm_task = prm_tasks.get(turn_num)
                 if prm_result is None and prm_task is not None and prm_task.done():
                     try:
                         prm_result = prm_task.result()
                     except (asyncio.CancelledError, Exception):
                         prm_result = None
-                await self._submit_turn_sample(
+                prm_tasks.pop(turn_num, None)
+                await self._finalize_turn_feedback(
                     turn_num,
                     turn_data,
                     session_id,
                     prm_result,
                 )
-            eff = self._session_effective.pop(session_id, 0)
+            eff = self._session_scored_turns.pop(session_id, 0)
             self._turn_counts.pop(session_id, None)
             self._pending_turn_data.pop(session_id, None)
             prm_tasks = self._prm_tasks.pop(session_id, {})
@@ -2017,7 +1995,7 @@ class SkillClawAPIServer:
                 if isinstance(task, asyncio.Task) and not task.done():
                     task.cancel()
             logger.info(
-                "[SessionDetect] closed session=%s reason=%s (effective_samples=%d)",
+                "[SessionDetect] closed session=%s reason=%s (scored_turns=%d)",
                 session_id,
                 reason,
                 eff,
@@ -2131,7 +2109,7 @@ class SkillClawAPIServer:
         response_text: str,
         instruction_text: str,
         next_state,
-        submit_ready_samples: bool = True,
+        finalize_ready_turns: bool = True,
     ):
         if not self.prm_scorer or not next_state:
             return
@@ -2140,10 +2118,10 @@ class SkillClawAPIServer:
             self.prm_scorer.evaluate(response_text, inst_text, session_id=session_id, turn_num=turn_num)
         )
         task.add_done_callback(self._task_done_cb)
-        if submit_ready_samples:
+        if finalize_ready_turns:
             task.add_done_callback(lambda _t: self._on_prm_done(session_id, turn_num, _t))
         else:
-            task.add_done_callback(lambda _t: self._on_prm_done_without_submit(session_id, turn_num, _t))
+            task.add_done_callback(lambda _t: self._on_prm_done_record_only(session_id, turn_num, _t))
         self._prm_tasks.setdefault(session_id, {})[turn_num] = task
         td = self._pending_turn_data.get(session_id, {}).get(turn_num)
         if td is not None:
@@ -2184,9 +2162,9 @@ class SkillClawAPIServer:
         self._apply_prm_result(session_id, turn_num, prm_result)
         if session_id in self._closing_sessions:
             return
-        self._maybe_submit_ready_samples(session_id)
+        self._maybe_finalize_ready_turns(session_id)
 
-    def _on_prm_done_without_submit(self, session_id: str, turn_num: int, task: asyncio.Task):
+    def _on_prm_done_record_only(self, session_id: str, turn_num: int, task: asyncio.Task):
         """Callback used for close-session PRM tasks; records score only."""
         if task.cancelled():
             return
@@ -2240,17 +2218,7 @@ class SkillClawAPIServer:
             logger.info("[OpenClaw] rewrote %d /new bootstrap user prompt(s) for provider safety", rewritten)
 
         def _prompt_len(msgs):
-            try:
-                norm_msgs = _normalize_messages_for_template(msgs)
-                text = self._tokenizer.apply_chat_template(
-                    norm_msgs,
-                    tools=body.get("tools"),
-                    tokenize=False,
-                    add_generation_prompt=True,
-                )
-                return len(self._tokenizer(text, add_special_tokens=False)["input_ids"])
-            except Exception:
-                return 0
+            return _estimate_openai_body_input_tokens({"messages": msgs, "tools": body.get("tools")})
 
         # Compress verbose system prompts (OpenClaw only).  Non-OpenClaw
         # agents send short or no system prompts; compressing them wastes an
@@ -2315,8 +2283,6 @@ class SkillClawAPIServer:
         forward_body = {k: v for k, v in body.items() if k not in _NON_STANDARD_BODY_KEYS}
         forward_body["stream"] = False
         forward_body.pop("stream_options", None)
-        forward_body["logprobs"] = True
-        forward_body["top_logprobs"] = 1
         if "model" not in forward_body:
             forward_body["model"] = self._served_model
         forward_body["messages"] = messages  # potentially skill-injected
@@ -2383,10 +2349,6 @@ class SkillClawAPIServer:
             if response_msg.get("content") is None:
                 response_msg["content"] = ""
 
-            norm_msgs = _normalize_messages_for_template(messages)
-            norm_resp = _normalize_messages_for_template([response_msg])[0]
-            full_norm = norm_msgs + [norm_resp]
-
             skill_path_map = self.skill_manager.get_skill_path_map() if self.skill_manager else {}
             read_skills = _extract_read_skills_from_tool_calls(
                 tool_calls,
@@ -2411,102 +2373,12 @@ class SkillClawAPIServer:
                 )
 
             user_instruction = _extract_last_user_instruction(messages)
-
-            if self._tokenizer is None:
-                self._turn_counts[session_id] = self._turn_counts.get(session_id, 0) + 1
-                turn_num = self._turn_counts[session_id]
-                prompt_text_simple = "\n".join(
-                    f"{m.get('role', '?')}: {_flatten_message_content(m.get('content', ''))}" for m in messages
-                )
-                response_text_simple = content or (json.dumps(tool_calls, ensure_ascii=False) if tool_calls else "")
-                self._buffer_record(
-                    session_id,
-                    turn_num,
-                    messages,
-                    prompt_text_simple,
-                    response_text_simple,
-                    tool_calls,
-                )
-                self._session_turns.setdefault(session_id, []).append(
-                    {
-                        "turn_num": turn_num,
-                        "prompt_text": user_instruction,
-                        "response_text": response_text_simple,
-                        "reasoning_content": reasoning or None,
-                        "tool_calls": tool_calls,
-                        "read_skills": read_skills,
-                        "modified_skills": modified_skills,
-                        "tool_results": tool_summaries,
-                        "tool_results_raw": [],
-                        "tool_observations": [],
-                        "tool_errors": [],
-                        "injected_skills": injected_skills,
-                        "prm_score": None,
-                    }
-                )
-                self._pending_turn_data.setdefault(session_id, {})[turn_num] = {
-                    "prompt_ids": [],
-                    "response_ids": [],
-                    "response_logprobs": [],
-                    "prompt_text": prompt_text_simple,
-                    "response_text": response_text_simple,
-                }
-                if session_done:
-                    await self._close_session(session_id)
-                output["session_id"] = session_id
-                return {"response": output}
-
-            prompt_text = self._tokenizer.apply_chat_template(
-                norm_msgs,
-                tools=tools,
-                tokenize=False,
-                add_generation_prompt=True,
-            )
-            full_text = self._tokenizer.apply_chat_template(
-                full_norm,
-                tools=tools,
-                tokenize=False,
-                add_generation_prompt=False,
-            )
-
-            if full_text.startswith(prompt_text):
-                response_text = full_text[len(prompt_text) :]
-            else:
-                logger.warning("[OpenClaw] prompt_text not prefix of full_text, using full_text as response")
-                response_text = full_text
-
-            prompt_ids = self._tokenizer(prompt_text, add_special_tokens=False)["input_ids"]
-            response_ids = self._tokenizer(response_text, add_special_tokens=False)["input_ids"]
-
-            if not response_ids and not response_text.strip() and not tool_calls:
-                logger.info("[OpenClaw] MAIN session=%s → empty response, skipping", session_id)
-                output["session_id"] = session_id
-                return {"response": output}
-
-            response_logprobs = _extract_logprobs_from_chat_response(choice)
-            if len(response_logprobs) > len(response_ids):
-                response_logprobs = response_logprobs[: len(response_ids)]
-            elif len(response_logprobs) < len(response_ids):
-                response_logprobs = response_logprobs + [0.0] * (len(response_ids) - len(response_logprobs))
-
-            turn_data = {
-                "prompt_ids": prompt_ids,
-                "response_ids": response_ids,
-                "response_logprobs": response_logprobs,
-                "prompt_text": prompt_text,
-                "response_text": response_text,
-            }
-
             self._turn_counts[session_id] = self._turn_counts.get(session_id, 0) + 1
             turn_num = self._turn_counts[session_id]
-
-            logger.info(
-                "[OpenClaw] MAIN session=%s turn=%d prompt_tokens=%d response_tokens=%d",
-                session_id,
-                turn_num,
-                len(prompt_ids),
-                len(response_ids),
+            prompt_text = "\n".join(
+                f"{m.get('role', '?')}: {_flatten_message_content(m.get('content', ''))}" for m in messages
             )
+            response_text = content or (json.dumps(tool_calls, ensure_ascii=False) if tool_calls else "")
             self._buffer_record(session_id, turn_num, messages, prompt_text, response_text, tool_calls)
             self._session_turns.setdefault(session_id, []).append(
                 {
@@ -2525,10 +2397,20 @@ class SkillClawAPIServer:
                     "prm_score": None,
                 }
             )
-            self._pending_turn_data.setdefault(session_id, {})[turn_num] = turn_data
-            self._maybe_submit_ready_samples(session_id)
+            self._pending_turn_data.setdefault(session_id, {})[turn_num] = {
+                "prompt_text": prompt_text,
+                "response_text": response_text,
+            }
+            logger.info(
+                "[OpenClaw] MAIN session=%s turn=%d prompt_est_tokens=%d response_chars=%d",
+                session_id,
+                turn_num,
+                _estimate_openai_body_input_tokens({"messages": messages, "tools": tools}),
+                len(response_text),
+            )
+            self._maybe_finalize_ready_turns(session_id)
         else:
-            logger.info("[OpenClaw] SIDE session=%s → skipped (no training data)", session_id)
+            logger.info("[OpenClaw] SIDE session=%s -> skipped (side-channel turn)", session_id)
 
         if session_done:
             await self._close_session(session_id)
@@ -2936,26 +2818,10 @@ class SkillClawAPIServer:
         tools,
         max_prompt_tokens: int,
     ) -> list[dict]:
-        """
-        Drop oldest non-system messages until the tokenized prompt fits within
-        max_prompt_tokens.  The system message (if any) is always kept.
-        At least one user message is always kept even if it alone exceeds the limit.
-        """
-        if self._tokenizer is None:
-            return messages
+        """Drop oldest non-system messages using a dependency-free token estimate."""
 
         def _prompt_len(msgs):
-            try:
-                norm_msgs = _normalize_messages_for_template(msgs)
-                text = self._tokenizer.apply_chat_template(
-                    norm_msgs,
-                    tools=tools,
-                    tokenize=False,
-                    add_generation_prompt=True,
-                )
-                return len(self._tokenizer(text, add_special_tokens=False)["input_ids"])
-            except Exception:
-                return 0
+            return _estimate_openai_body_input_tokens({"messages": msgs, "tools": tools})
 
         if _prompt_len(messages) <= max_prompt_tokens:
             return messages
@@ -2964,23 +2830,18 @@ class SkillClawAPIServer:
         sys_msgs = [m for m in messages if m.get("role") == "system"]
         non_sys = [m for m in messages if m.get("role") != "system"]
 
-        # Greedily keep most-recent messages
-        kept = []
-        for msg in reversed(non_sys):
-            candidate = sys_msgs + list(reversed(kept + [msg]))
+        dropped = 0
+        while len(non_sys) > 1:
+            candidate = sys_msgs + non_sys[dropped + 1 :]
             if _prompt_len(candidate) <= max_prompt_tokens:
-                kept.append(msg)
-            elif not kept:
-                kept.append(msg)  # keep at least one user message
+                dropped += 1
                 break
-            else:
-                break
+            dropped += 1
 
-        result = sys_msgs + list(reversed(kept))
-        dropped = len(messages) - len(result)
-        if dropped > 0:
-            logger.warning(
-                "[OpenClaw] context truncated: dropped %d oldest messages (%d → %d tokens, limit=%d)",
+        result = sys_msgs + non_sys[dropped:]
+        if dropped:
+            logger.info(
+                "[OpenClaw] context truncated: dropped %d oldest messages (%d -> %d est tokens, limit=%d)",
                 dropped,
                 _prompt_len(messages),
                 _prompt_len(result),
@@ -3034,58 +2895,24 @@ class SkillClawAPIServer:
         return messages, skill_names
 
     # ------------------------------------------------------------------ #
-    # Sample submission                                                    #
+    # Turn feedback finalization                                           #
     # ------------------------------------------------------------------ #
 
-    def _maybe_submit_ready_samples(
-        self,
-        session_id: str,
-        force_no_prm: bool = False,
-        force_last_prm: bool = False,
-    ):
-        """Submit turns whose PRM and teacher queries are done.
-
-        force_no_prm: also submit turns that have no PRM task yet (used at
-        session end for the last turn which will never get a next_state).
-        force_last_prm: when closing a session, fire PRM for the latest
-        pending turn even if it never received a next_state.
-        When force is active, pending teacher tasks are also skipped.
-        """
+    def _maybe_finalize_ready_turns(self, session_id: str):
+        """Finalize turns whose optional PRM scoring is done."""
         prm_tasks = self._prm_tasks.setdefault(session_id, {})
         pending = self._pending_turn_data.get(session_id, {})
         for turn_num in sorted(list(pending.keys())):
-            # --- PRM readiness ---
             prm_task = prm_tasks.get(turn_num)
-            if not self.config.use_prm or not self.prm_scorer:
-                pass  # no PRM → submit immediately
-            elif force_last_prm and prm_task is None:
-                turn_data = pending.get(turn_num)
-                if turn_data is not None:
-                    prm_task = asyncio.create_task(
-                        self.prm_scorer.evaluate(
-                            turn_data.get("response_text", ""),
-                            turn_data.get("prompt_text", ""),
-                            session_id=session_id,
-                            turn_num=turn_num,
-                        )
-                    )
-                    prm_task.add_done_callback(self._task_done_cb)
-                    prm_task.add_done_callback(
-                        lambda _t, sid=session_id, tnum=turn_num: self._on_prm_done_without_submit(sid, tnum, _t)
-                    )
-                    prm_tasks[turn_num] = prm_task
-                continue
-            elif prm_task is not None and not prm_task.done():
-                continue  # PRM still running
-            elif prm_task is None and not force_no_prm:
-                continue  # waiting for next_state to fire PRM
+            if self.config.use_prm and self.prm_scorer:
+                if prm_task is None:
+                    continue  # waiting for the next turn to provide scoring context
+                if not prm_task.done():
+                    continue
 
             turn_data = pending.pop(turn_num)
-            prm_result = None
-            cached_prm_result = turn_data.pop("prm_result", None)
-            if cached_prm_result is not None:
-                prm_result = cached_prm_result
-            if prm_task is not None and prm_task.done():
+            prm_result = turn_data.pop("prm_result", None)
+            if prm_result is None and prm_task is not None and prm_task.done():
                 try:
                     prm_result = prm_task.result()
                 except (asyncio.CancelledError, Exception):
@@ -3093,7 +2920,7 @@ class SkillClawAPIServer:
                 prm_tasks.pop(turn_num, None)
 
             self._safe_create_task(
-                self._submit_turn_sample(
+                self._finalize_turn_feedback(
                     turn_num,
                     turn_data,
                     session_id,
@@ -3101,103 +2928,29 @@ class SkillClawAPIServer:
                 )
             )
 
-    async def _submit_ready_samples_inline(
-        self,
-        session_id: str,
-        force_no_prm: bool = False,
-    ) -> None:
-        """Submit ready samples inline, used when closing a session.
-
-        Unlike ``_maybe_submit_ready_samples``, this awaits the submission
-        coroutine directly so the final PRM/sample records are durable before
-        session cleanup continues.
-        """
-        prm_tasks = self._prm_tasks.setdefault(session_id, {})
-        pending = self._pending_turn_data.get(session_id, {})
-        for turn_num in sorted(list(pending.keys())):
-            prm_task = prm_tasks.get(turn_num)
-            if not self.config.use_prm or not self.prm_scorer:
-                pass
-            elif prm_task is not None and not prm_task.done():
-                continue
-            elif prm_task is None and not force_no_prm:
-                continue
-
-            turn_data = pending.pop(turn_num)
-            prm_result = None
-            cached_prm_result = turn_data.pop("prm_result", None)
-            if cached_prm_result is not None:
-                prm_result = cached_prm_result
-            if prm_task is not None and prm_task.done():
-                try:
-                    prm_result = prm_task.result()
-                except (asyncio.CancelledError, Exception):
-                    pass
-                prm_tasks.pop(turn_num, None)
-
-            await self._submit_turn_sample(
-                turn_num,
-                turn_data,
-                session_id,
-                prm_result,
-            )
-
-    async def _submit_turn_sample(
+    async def _finalize_turn_feedback(
         self,
         turn_num: int,
         turn_data: dict[str, Any],
         session_id: str,
         prm_result: Optional[dict],
     ):
-        prompt_ids = turn_data["prompt_ids"]
-        response_ids = turn_data["response_ids"]
+        """Finalize a turn after optional PRM scoring.
 
-        has_next_state = turn_data.get("has_next_state", False)
-        score = prm_result["score"] if prm_result else 0.0
-
-        exclude = not has_next_state or score == 0.0
-        # Guarantee at least one tokenized sample per session is retained when
-        # sample export is enabled.
-        if exclude and has_next_state and self._session_effective.get(session_id, 0) == 0:
-            exclude = False
-            logger.info(
-                "[OpenClaw] promoting session=%s turn with score=0 → loss_mask=1 (at-least-one guarantee)",
-                session_id,
-            )
-
-        loss_mask = [0] * len(response_ids) if exclude else [1] * len(response_ids)
-        _ = ConversationSample(
-            session_id=session_id,
-            turn_num=turn_num,
-            prompt_tokens=prompt_ids,
-            response_tokens=response_ids,
-            response_logprobs=turn_data["response_logprobs"],
-            loss_mask=loss_mask,
-            reward=score,
-            prompt_text=turn_data.get("prompt_text", ""),
-            response_text=turn_data.get("response_text", ""),
-            skill_generation=self.skill_manager.generation if self.skill_manager else 0,
-        )
-
-        if not exclude:
-            self._session_effective[session_id] = self._session_effective.get(session_id, 0) + 1
-
-        index = next(self._index_counter)
-        next(self._group_counter)
-
+        SkillClaw acts as an external-agent proxy, so finalization keeps only
+        feedback/record side effects that are consumed by the framework.
+        """
+        score = prm_result.get("score", 0.0) if prm_result else 0.0
         if prm_result:
             self._append_prm_record(session_id, turn_num, score, prm_result.get("votes", []))
+            self._session_scored_turns[session_id] = self._session_scored_turns.get(session_id, 0) + 1
 
         logger.info(
-            "[OpenClaw] submitted sample session=%s turn=%d index=%d score=%.1f exclude=%s "
-            "prompt_len=%d response_len=%d",
+            "[OpenClaw] finalized turn session=%s turn=%d score=%.1f response_chars=%d",
             session_id,
             turn_num,
-            index,
             score,
-            exclude,
-            len(prompt_ids),
-            len(response_ids),
+            len(turn_data.get("response_text", "")),
         )
 
     # ------------------------------------------------------------------ #

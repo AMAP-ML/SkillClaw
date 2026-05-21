@@ -17,10 +17,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Tokenizer for prompt truncation and PRM/OPD token-level data
-tokenizer = [
-    "transformers>=4.51.1",
-]
 # Embedding-based skill retrieval
 embedding = [
     "numpy",
@@ -44,7 +40,7 @@ server = [
 ]
 # Everything
 all = [
-    "skillclaw[tokenizer,embedding,evolve,sharing,server]",
+    "skillclaw[embedding,evolve,sharing,server]",
 ]
 
 [project.scripts]

@@ -75,6 +75,10 @@ class SkillClawLauncher:
                 public_skill_root=cfg.skills_public_root,
                 retrieval_mode=cfg.retrieval_mode,
                 embedding_model_path=cfg.embedding_model_path,
+                embedding_type=cfg.embedding_type,
+                embedding_api_url=cfg.embedding_api_url,
+                embedding_api_model=cfg.embedding_api_model,
+                embedding_api_key=cfg.embedding_api_key,
             )
             logger.info("[Launcher] SkillManager loaded: %s skills", skill_manager.get_skill_count())
 

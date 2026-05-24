@@ -174,6 +174,10 @@ class SkillManager:
         public_skill_root: str = "",
         retrieval_mode: str = "template",
         embedding_model_path: Optional[str] = None,
+        embedding_type: str = "local",
+        embedding_api_url: Optional[str] = None,
+        embedding_api_model: Optional[str] = None,
+        embedding_api_key: Optional[str] = None,
     ):
         if retrieval_mode not in ("template", "embedding"):
             raise ValueError(f"retrieval_mode must be 'template' or 'embedding', got '{retrieval_mode}'")
@@ -183,7 +187,11 @@ class SkillManager:
         self._skills_dir = skills_dir
         self._public_skill_root = public_skill_root.strip()
         self.retrieval_mode = retrieval_mode
+        self.embedding_type = embedding_type
         self.embedding_model_path = embedding_model_path or "Qwen/Qwen3-Embedding-0.6B"
+        self.embedding_api_url = embedding_api_url
+        self.embedding_api_model = embedding_api_model
+        self.embedding_api_key = embedding_api_key
 
         self._embedding_model = None
         self._skill_embeddings_cache: Optional[Dict] = None
@@ -199,10 +207,11 @@ class SkillManager:
 
         counts = self._category_counts()
         logger.info(
-            "[SkillManager] loaded %d skills from %s | mode=%s | categories=%s",
+            "[SkillManager] loaded %d skills from %s | mode=%s | embedding_type=%s | categories=%s",
             len(self.skills.get("all_skills", [])),
             skills_dir,
             retrieval_mode,
+            embedding_type,
             dict(counts),
         )
 
@@ -372,16 +381,37 @@ class SkillManager:
     # ------------------------------------------------------------------ #
 
     def _get_embedding_model(self):
+        """Get embedding model - either local SentenceTransformer or API client."""
         if self._embedding_model is None:
-            try:
-                from sentence_transformers import SentenceTransformer
-            except ImportError:
-                raise ImportError(
-                    "sentence-transformers is required for embedding retrieval. "
-                    "Install with: pip install sentence-transformers"
+            if self.embedding_type == "api":
+                # Use OpenAI-compatible API
+                if not self.embedding_api_url or not self.embedding_api_model:
+                    raise ValueError(
+                        "embedding_api_url and embedding_api_model must be set when embedding_type='api'"
+                    )
+                from .embedding_api_client import EmbeddingAPIClient
+
+                logger.info(
+                    "[SkillManager] using embedding API: %s (model: %s)",
+                    self.embedding_api_url,
+                    self.embedding_api_model,
                 )
-            logger.info("[SkillManager] loading embedding model: %s", self.embedding_model_path)
-            self._embedding_model = SentenceTransformer(self.embedding_model_path)
+                self._embedding_model = EmbeddingAPIClient(
+                    api_url=self.embedding_api_url,
+                    model=self.embedding_api_model,
+                    api_key=self.embedding_api_key,
+                )
+            else:
+                # Use local SentenceTransformer model
+                try:
+                    from sentence_transformers import SentenceTransformer
+                except ImportError:
+                    raise ImportError(
+                        "sentence-transformers is required for local embedding. "
+                        "Install with: pip install sentence-transformers"
+                    )
+                logger.info("[SkillManager] loading embedding model: %s", self.embedding_model_path)
+                self._embedding_model = SentenceTransformer(self.embedding_model_path)
         return self._embedding_model
 
     @staticmethod

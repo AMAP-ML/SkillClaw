@@ -286,6 +286,18 @@ class SetupWizard:
                 "user_alias": user_alias,
                 "auto_pull_on_start": auto_pull,
             }
+            for key in (
+                "skill_backend",
+                "session_backend",
+                "nacos_server",
+                "nacos_namespace_id",
+                "nacos_access_token",
+                "nacos_username",
+                "nacos_password",
+                "nacos_label",
+            ):
+                if current_sharing.get(key):
+                    sharing_config[key] = current_sharing[key]
             if sharing_backend == "local":
                 local_root = _prompt(
                     "Local shared storage root",

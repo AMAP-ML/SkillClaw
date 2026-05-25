@@ -256,10 +256,12 @@ class EvolveServerConfig:
         """Build from an existing ``SkillClawConfig`` (reuse sharing + LLM settings)."""
         engine = _first_env("EVOLVE_ENGINE", default="workflow").strip().lower() or "workflow"
         sharing_backend = str(getattr(config, "sharing_backend", "") or "").strip().lower()
+        skill_backend = str(getattr(config, "sharing_skill_backend", "") or "").strip().lower() or sharing_backend
         session_backend = str(getattr(config, "sharing_session_backend", "") or "").strip().lower()
-        storage_endpoint = str(
+        sharing_endpoint = str(
             getattr(config, "sharing_endpoint", "") or getattr(config, "sharing_oss_endpoint", "") or ""
         )
+        storage_endpoint = "" if sharing_backend == "nacos" and not session_backend else sharing_endpoint
         storage_bucket = str(getattr(config, "sharing_bucket", "") or getattr(config, "sharing_oss_bucket", "") or "")
         storage_access_key_id = str(
             getattr(config, "sharing_access_key_id", "") or getattr(config, "sharing_oss_access_key_id", "") or ""
@@ -297,25 +299,24 @@ class EvolveServerConfig:
                 default="openai-completions",
             )
 
+        storage_backend = _first_env("EVOLVE_STORAGE_BACKEND", default="")
+        if not storage_backend:
+            if session_backend:
+                storage_backend = session_backend
+            elif local_root:
+                storage_backend = "local"
+            elif sharing_backend and sharing_backend != "nacos":
+                storage_backend = sharing_backend
+            elif (storage_bucket or storage_endpoint) and sharing_backend != "nacos":
+                storage_backend = "oss" if "aliyuncs.com" in storage_endpoint else "s3"
+
+        nacos_server = str(getattr(config, "sharing_nacos_server", "") or "")
+        if not nacos_server and sharing_backend == "nacos" and skill_backend == "nacos":
+            nacos_server = sharing_endpoint
+
         return cls(
             engine=engine,
-            storage_backend=_first_env("EVOLVE_STORAGE_BACKEND", default="")
-            or (
-                session_backend
-                if session_backend
-                else "local"
-                if local_root
-                else "s3"
-                if (storage_bucket or storage_endpoint) and sharing_backend != "nacos"
-                else ""
-            )
-            or (
-                "local"
-                if local_root
-                else "oss"
-                if sharing_backend != "nacos"
-                else ""
-            ),
+            storage_backend=storage_backend,
             storage_endpoint=storage_endpoint,
             storage_bucket=storage_bucket,
             storage_access_key_id=storage_access_key_id,
@@ -344,8 +345,8 @@ class EvolveServerConfig:
             validation_required_approvals=int(os.environ.get("EVOLVE_VALIDATION_REQUIRED_APPROVALS", "1")),
             validation_min_mean_score=float(os.environ.get("EVOLVE_VALIDATION_MIN_MEAN_SCORE", "0.75")),
             validation_max_rejections=int(os.environ.get("EVOLVE_VALIDATION_MAX_REJECTIONS", "1")),
-            skill_storage_backend="nacos" if sharing_backend == "nacos" else "",
-            nacos_server=str(getattr(config, "sharing_nacos_server", "") or storage_endpoint),
+            skill_storage_backend="nacos" if skill_backend == "nacos" else "",
+            nacos_server=nacos_server,
             nacos_namespace_id=str(getattr(config, "sharing_nacos_namespace_id", "") or "public"),
             nacos_access_token=str(getattr(config, "sharing_nacos_access_token", "") or ""),
             nacos_username=str(getattr(config, "sharing_nacos_username", "") or ""),

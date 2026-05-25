@@ -51,7 +51,8 @@ def _build_skill_filter(config: SkillClawConfig, *, no_filter: bool = False) -> 
 
 
 def _sharing_backend(config: SkillClawConfig) -> str:
-    backend = str(config.sharing_backend or "").strip().lower()
+    backend = str(config.sharing_skill_backend or "").strip().lower()
+    backend = backend or str(config.sharing_backend or "").strip().lower()
     if backend:
         return backend
     if config.sharing_local_root:
@@ -65,6 +66,11 @@ def _sharing_target(config: SkillClawConfig) -> str:
     backend = _sharing_backend(config)
     if backend == "local":
         return f"local:{config.sharing_local_root}/{config.sharing_group_id}"
+    if backend == "nacos":
+        server = config.sharing_nacos_server or (
+            config.sharing_endpoint if str(config.sharing_backend or "").strip().lower() == "nacos" else ""
+        )
+        return f"nacos:{config.sharing_nacos_namespace_id}/{config.sharing_nacos_label}@{server}"
     if config.sharing_bucket:
         return f"{backend}:{config.sharing_bucket}/{config.sharing_group_id}"
     return f"{backend}:{config.sharing_group_id}"
@@ -80,6 +86,11 @@ def _require_sharing_hub(config: SkillClawConfig) -> SkillHub:
         raise ValueError("s3 sharing backend requires sharing_bucket")
     if backend == "oss" and (not config.sharing_bucket or not config.sharing_endpoint):
         raise ValueError("oss sharing backend requires sharing_bucket and sharing_endpoint")
+    if backend == "nacos" and not (
+        config.sharing_nacos_server
+        or (config.sharing_endpoint if str(config.sharing_backend or "").strip().lower() == "nacos" else "")
+    ):
+        raise ValueError("nacos skill backend requires sharing_nacos_server")
     if not backend:
         raise ValueError("sharing backend is not configured")
     return SkillHub.from_config(config)

@@ -1360,6 +1360,7 @@ def build_dashboard_snapshot(config: SkillClawConfig) -> dict[str, Any]:
             "sharing_enabled": bool(config.sharing_enabled),
             "dashboard_include_shared": bool(config.dashboard_include_shared),
             "sharing_backend": str(config.sharing_backend or ""),
+            "sharing_skill_backend": str(config.sharing_skill_backend or ""),
             "sharing_group_id": str(config.sharing_group_id or "default"),
             "sharing_local_root": str(config.sharing_local_root or ""),
             "sharing_user_alias": str(config.sharing_user_alias or ""),

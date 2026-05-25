@@ -87,8 +87,11 @@ class SkillClawConfig:
     sharing_region: str = ""
     sharing_session_token: str = ""
     sharing_local_root: str = ""
-    # Optional object-storage backend for non-skill artifacts when
-    # sharing_backend is reserved for the Skill registry.
+    # Optional override for skill assets. When empty, sharing_backend keeps its
+    # legacy behavior and is used for both skills and session artifacts.
+    sharing_skill_backend: str = ""
+    # Optional object-storage backend for non-skill artifacts when the skill
+    # backend is reserved for the Skill registry.
     sharing_session_backend: str = ""
     sharing_nacos_server: str = ""
     sharing_nacos_namespace_id: str = "public"

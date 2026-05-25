@@ -69,6 +69,7 @@ _DEFAULTS: dict = {
         "region": "",
         "session_token": "",
         "local_root": "",
+        "skill_backend": "",
         "session_backend": "",
         "nacos_server": "",
         "nacos_namespace_id": "public",
@@ -293,7 +294,12 @@ class ConfigStore:
         sharing_region = _first_non_empty(sharing, "region")
         sharing_session_token = _first_non_empty(sharing, "session_token")
         sharing_local_root = _first_non_empty(sharing, "local_root")
+        sharing_skill_backend = _first_non_empty(sharing, "skill_backend")
         sharing_session_backend = _first_non_empty(sharing, "session_backend")
+        effective_skill_backend = sharing_skill_backend or sharing_backend
+        nacos_server = str(sharing.get("nacos_server", "") or "")
+        if not nacos_server and sharing_backend == "nacos" and effective_skill_backend == "nacos":
+            nacos_server = sharing_endpoint
 
         prm_provider = prm.get("provider", "openai")
         prm_url = str(prm.get("url", "") or llm_api_base)
@@ -354,8 +360,9 @@ class ConfigStore:
             sharing_region=sharing_region,
             sharing_session_token=sharing_session_token,
             sharing_local_root=sharing_local_root,
+            sharing_skill_backend=sharing_skill_backend,
             sharing_session_backend=sharing_session_backend,
-            sharing_nacos_server=str(sharing.get("nacos_server", "") or sharing_endpoint),
+            sharing_nacos_server=nacos_server,
             sharing_nacos_namespace_id=str(
                 sharing.get("nacos_namespace_id", "")
                 or sharing.get("namespace_id", "")
@@ -431,28 +438,33 @@ class ConfigStore:
         validation = data.get("validation", {})
         if sharing.get("enabled"):
             backend = _infer_sharing_backend(sharing) or "unknown"
+            skill_backend = str(sharing.get("skill_backend", "") or "").strip().lower()
+            effective_skill_backend = skill_backend or backend
             lines += [
                 "sharing.enabled: True",
                 f"sharing.backend: {backend}",
             ]
+            if skill_backend:
+                lines.append(f"sharing.skill_backend: {skill_backend}")
             if backend == "local":
                 lines += [
                     f"sharing.local_root: {sharing.get('local_root', '?')}",
                 ]
-            elif backend == "nacos":
+            elif backend in {"s3", "oss"}:
                 lines += [
-                    f"sharing.nacos_server: {sharing.get('nacos_server') or sharing.get('endpoint', '?')}",
+                    f"sharing.bucket:  {_first_non_empty(sharing, 'bucket', default='?')}",
+                    f"sharing.endpoint: {_first_non_empty(sharing, 'endpoint', default='(default)')}",
+                ]
+            if effective_skill_backend == "nacos":
+                nacos_server = sharing.get("nacos_server") or (sharing.get("endpoint") if backend == "nacos" else "?")
+                lines += [
+                    f"sharing.nacos_server: {nacos_server}",
                     "sharing.nacos_namespace: "
                     f"{sharing.get('nacos_namespace_id') or sharing.get('namespace_id', 'public')}",
                     f"sharing.nacos_label: {sharing.get('nacos_label') or sharing.get('label', 'latest')}",
                     "sharing.nacos_lifecycle: upload -> submit; review/publish policy is controlled by Nacos",
                     "sharing.session_backend: "
                     f"{sharing.get('session_backend') or ('local' if sharing.get('local_root') else 'not configured')}",
-                ]
-            else:
-                lines += [
-                    f"sharing.bucket:  {_first_non_empty(sharing, 'bucket', default='?')}",
-                    f"sharing.endpoint: {_first_non_empty(sharing, 'endpoint', default='(default)')}",
                 ]
             lines += [
                 f"sharing.group:   {sharing.get('group_id', 'default')}",

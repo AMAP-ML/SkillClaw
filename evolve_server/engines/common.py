@@ -37,6 +37,14 @@ class EvolveEngineMixin:
         """Create the object-store adapter for an engine."""
         if mock:
             return LocalBucket(root=mock_root)
+        if (
+            str(getattr(config, "skill_storage_backend", "") or "").strip().lower() == "nacos"
+            and not str(getattr(config, "storage_backend", "") or "").strip()
+        ):
+            raise ValueError(
+                "sharing.skill_backend=nacos stores skill assets only. Configure session storage with "
+                "sharing.backend, sharing.session_backend, sharing.local_root, EVOLVE_STORAGE_*, or use --mock."
+            )
         return build_object_store(
             backend=config.storage_backend,
             endpoint=config.storage_endpoint,

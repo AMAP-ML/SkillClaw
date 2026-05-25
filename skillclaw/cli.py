@@ -748,7 +748,10 @@ def skills():
 
 
 def _sharing_backend(cfg) -> str:
-    backend = str(getattr(cfg, "sharing_backend", "") or "").strip().lower()
+    backend = (
+        str(getattr(cfg, "sharing_skill_backend", "") or "").strip().lower()
+        or str(getattr(cfg, "sharing_backend", "") or "").strip().lower()
+    )
     if backend:
         return backend
     if getattr(cfg, "sharing_local_root", ""):
@@ -762,7 +765,11 @@ def _sharing_target(cfg) -> str:
     if backend == "local":
         return f"local storage ({cfg.sharing_local_root}/{group})"
     if backend == "nacos":
-        server = getattr(cfg, "sharing_nacos_server", "") or getattr(cfg, "sharing_endpoint", "")
+        server = getattr(cfg, "sharing_nacos_server", "") or (
+            getattr(cfg, "sharing_endpoint", "")
+            if str(getattr(cfg, "sharing_backend", "") or "").strip().lower() == "nacos"
+            else ""
+        )
         namespace_id = getattr(cfg, "sharing_nacos_namespace_id", "public")
         label = getattr(cfg, "sharing_nacos_label", "latest")
         return f"nacos ({namespace_id}, label={label} @ {server})"
@@ -803,9 +810,15 @@ def _require_sharing(cs: ConfigStore):
                 "OSS credentials are not configured. Set sharing.access_key_id and sharing.secret_access_key."
             )
     elif backend == "nacos":
-        if not (getattr(cfg, "sharing_nacos_server", "") or getattr(cfg, "sharing_endpoint", "")):
+        legacy_endpoint = (
+            getattr(cfg, "sharing_endpoint", "")
+            if str(getattr(cfg, "sharing_backend", "") or "").strip().lower() == "nacos"
+            else ""
+        )
+        if not (getattr(cfg, "sharing_nacos_server", "") or legacy_endpoint):
             raise click.ClickException(
-                "Nacos sharing backend is not configured. Set sharing.nacos_server or sharing.endpoint first."
+                "Nacos skill backend is not configured. Set sharing.nacos_server first "
+                "(legacy sharing.backend=nacos may use sharing.endpoint)."
             )
     else:
         raise click.ClickException(
@@ -863,7 +876,7 @@ def skills_publish(name, version, no_update_latest):
     cs = ConfigStore()
     cfg, hub = _require_sharing(cs)
     if _sharing_backend(cfg) != "nacos" or not hasattr(hub, "publish_skill"):
-        raise click.ClickException("skills publish is only available when sharing.backend is nacos.")
+        raise click.ClickException("skills publish is only available when sharing.skill_backend is nacos.")
     result = hub.publish_skill(name, version, update_latest_label=not no_update_latest)
     click.echo(
         f"Published {result['skill_name']} {result['version']} "

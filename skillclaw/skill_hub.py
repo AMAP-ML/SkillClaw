@@ -91,7 +91,8 @@ class SkillHub:
 
     @classmethod
     def from_config(cls, config) -> "SkillHub":
-        backend = str(getattr(config, "sharing_backend", "") or "").strip().lower()
+        sharing_backend = str(getattr(config, "sharing_backend", "") or "").strip().lower()
+        backend = str(getattr(config, "sharing_skill_backend", "") or "").strip().lower() or sharing_backend
         if backend == "nacos":
             from .nacos_skill_hub import NacosSkillHub
 
@@ -118,9 +119,10 @@ class SkillHub:
     def object_storage_from_config(cls, config) -> Optional["SkillHub"]:
         """Build the legacy object-store hub for non-skill artifacts.
 
-        ``sharing.backend=nacos`` selects only the Skill registry. Sessions,
-        validation jobs, and other non-skill artifacts must continue to use
-        local/OSS/S3 object storage when that storage is explicitly configured.
+        ``sharing.skill_backend=nacos`` selects only the Skill registry.
+        Sessions, validation jobs, and other non-skill artifacts must continue
+        to use local/OSS/S3 object storage when that storage is explicitly
+        configured.
         """
         sharing_backend = str(getattr(config, "sharing_backend", "") or "").strip().lower()
         backend = str(getattr(config, "sharing_session_backend", "") or "").strip().lower()

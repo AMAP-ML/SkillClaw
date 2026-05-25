@@ -282,6 +282,17 @@ skillclaw skills pull
 
 If your team uses a mounted local shared directory instead of OSS/S3, use `sharing.backend local` plus `sharing.local_root /path/to/shared/root` instead of the remote storage keys.
 
+To store skill assets in Nacos while keeping session and validation artifacts in the existing shared storage, set a
+skill backend override:
+
+```bash
+skillclaw config sharing.backend oss
+skillclaw config sharing.skill_backend nacos
+skillclaw config sharing.nacos_server http://nacos.example.com
+```
+
+When `sharing.skill_backend` is empty, SkillClaw keeps the legacy behavior and uses `sharing.backend` for skill assets.
+
 When you join a shared group:
 
 - you still run only the local client proxy on your machine

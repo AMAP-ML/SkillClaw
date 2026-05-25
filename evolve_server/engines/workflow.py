@@ -139,16 +139,25 @@ class EvolveServer(EvolveEngineMixin):
     def _fetch_skill(self, name: str) -> Optional[str]:
         if self._nacos_skill_client is not None:
             try:
-                from skillclaw.nacos_skill_hub import _nacos_zip_to_bundle
+                from skillclaw.nacos_skill_hub import _nacos_working_version, _nacos_zip_to_bundle
 
                 record = self._load_remote_skill_record(name) or {}
-                labels = record.get("labels") if isinstance(record.get("labels"), dict) else {}
-                version = labels.get(str(getattr(self.config, "nacos_label", "") or "latest"))
-                zip_bytes = self._nacos_skill_client.download_skill_zip(
-                    name,
-                    version=version,
-                    label=str(getattr(self.config, "nacos_label", "") or "latest"),
-                )
+                try:
+                    detail = self._nacos_skill_client.get_skill(name) if record else {}
+                except Exception:
+                    detail = {}
+                working = _nacos_working_version(record, detail)
+                if working:
+                    _status, version = working
+                    zip_bytes = self._nacos_skill_client.download_skill_zip(name, version=version, admin=True)
+                else:
+                    labels = record.get("labels") if isinstance(record.get("labels"), dict) else {}
+                    version = labels.get(str(getattr(self.config, "nacos_label", "") or "latest"))
+                    zip_bytes = self._nacos_skill_client.download_skill_zip(
+                        name,
+                        version=version,
+                        label=str(getattr(self.config, "nacos_label", "") or "latest"),
+                    )
                 bundle = _nacos_zip_to_bundle(zip_bytes)
                 data = bundle.get("SKILL.md")
                 return data.decode("utf-8") if data is not None else None
@@ -157,23 +166,60 @@ class EvolveServer(EvolveEngineMixin):
                 return None
         return fetch_skill_content(self._bucket, self._prefix, name)
 
-    def _upload_skill(self, skill: dict, action: str) -> None:
+    def _upload_skill(self, skill: dict, action: str) -> str:
         name = skill.get("name", "")
         if not name:
-            return
+            return "skipped_missing_name"
 
         if self._nacos_skill_client is not None:
-            from skillclaw.nacos_skill_hub import _bundle_to_nacos_zip, _next_version
+            from skillclaw.nacos_skill_hub import (
+                _bundle_matches_remote,
+                _bundle_to_nacos_zip,
+                _nacos_working_version,
+                _nacos_zip_to_bundle,
+                _next_version,
+            )
 
             md_content = build_skill_md(skill)
             md_bytes = md_content.encode("utf-8")
+            bundle_files = {"SKILL.md": md_bytes}
             record = self._load_remote_skill_record(name) or {}
             try:
                 detail = self._nacos_skill_client.get_skill(name) if record else {}
             except Exception:
                 detail = {}
+            working = _nacos_working_version(record, detail)
+            if working:
+                status, version = working
+                try:
+                    zip_bytes = self._nacos_skill_client.download_skill_zip(name, version=version, admin=True)
+                    remote_bundle = _nacos_zip_to_bundle(zip_bytes)
+                except Exception as exc:
+                    logger.warning(
+                        "[EvolveServer] skipping Nacos skill %s: failed to inspect %s version %s: %s",
+                        name,
+                        status,
+                        version,
+                        exc,
+                    )
+                    return f"skipped_existing_{status}"
+                if _bundle_matches_remote(bundle_files, remote_bundle):
+                    logger.info(
+                        "[EvolveServer] skipped Nacos skill %s: %s version %s already matches",
+                        name,
+                        status,
+                        version,
+                    )
+                    return f"skipped_existing_{status}"
+                logger.info(
+                    "[EvolveServer] skipped Nacos skill %s: %s version %s already exists",
+                    name,
+                    status,
+                    version,
+                )
+                return f"skipped_existing_{status}"
             target_version = _next_version(record, detail)
-            zip_bytes = _bundle_to_nacos_zip(name, {"SKILL.md": md_bytes})
+            zip_bytes = _bundle_to_nacos_zip(name, bundle_files)
             self._nacos_skill_client.upload_skill_zip(
                 zip_bytes=zip_bytes,
                 filename=f"{name}-{target_version}.zip",
@@ -187,7 +233,7 @@ class EvolveServer(EvolveEngineMixin):
                 target_version,
                 action,
             )
-            return
+            return "uploaded"
 
         skill_id = self._id_registry.get_or_create(name)
         md_content = build_skill_md(skill)
@@ -234,6 +280,7 @@ class EvolveServer(EvolveEngineMixin):
             version,
             object_key,
         )
+        return "uploaded"
 
     def _detect_conflict(self, name: str, incoming_skill: dict) -> bool:
         if self._nacos_skill_client is not None:
@@ -251,18 +298,18 @@ class EvolveServer(EvolveEngineMixin):
         incoming_sha = hashlib.sha256(incoming_md.encode("utf-8")).hexdigest()
         return existing_sha != incoming_sha
 
-    async def _resolve_and_upload(self, skill: dict, action_type: str) -> str:
+    async def _resolve_and_upload(self, skill: dict, action_type: str) -> tuple[str, bool]:
         name = skill.get("name", "")
         has_conflict = await self._call_storage(self._detect_conflict, name, skill)
         if not has_conflict:
-            await self._call_storage(self._upload_skill, skill, action_type)
-            return action_type
+            upload_status = await self._call_storage(self._upload_skill, skill, action_type)
+            return (action_type, True) if upload_status == "uploaded" else (upload_status, False)
 
         logger.info("[EvolveServer] conflict detected for '%s' - merging", name)
         existing_md = await self._call_storage(self._fetch_skill, name)
         if not existing_md:
-            await self._call_storage(self._upload_skill, skill, action_type)
-            return action_type
+            upload_status = await self._call_storage(self._upload_skill, skill, action_type)
+            return (action_type, True) if upload_status == "uploaded" else (upload_status, False)
 
         existing_skill = parse_skill_content(name, existing_md)
         existing_skill = self._overlay_manifest_metadata(
@@ -273,12 +320,12 @@ class EvolveServer(EvolveEngineMixin):
         merged = await execute_merge(self._llm, existing_skill, skill)
         if merged and merged.get("name"):
             merged["name"] = name
-            await self._call_storage(self._upload_skill, merged, "merge")
-            return "merge"
+            upload_status = await self._call_storage(self._upload_skill, merged, "merge")
+            return ("merge", True) if upload_status == "uploaded" else (upload_status, False)
 
         logger.warning("[EvolveServer] merge failed for '%s' - keeping incoming version", name)
-        await self._call_storage(self._upload_skill, skill, action_type)
-        return action_type
+        upload_status = await self._call_storage(self._upload_skill, skill, action_type)
+        return (action_type, True) if upload_status == "uploaded" else (upload_status, False)
 
     def _empty_judge_summary(self) -> dict[str, Any]:
         return {
@@ -354,6 +401,7 @@ class EvolveServer(EvolveEngineMixin):
             "pending": 0,
             "published": 0,
             "rejected": 0,
+            "skipped": 0,
         }
 
     def _build_validation_evidence(self, sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -518,11 +566,11 @@ class EvolveServer(EvolveEngineMixin):
                     summary["rejected"] += 1
                     continue
                 action_type = str(job.get("proposed_action", DecisionAction.CREATE) or DecisionAction.CREATE)
-                actual_action = await self._resolve_and_upload(candidate_skill, action_type)
+                actual_action, uploaded = await self._resolve_and_upload(candidate_skill, action_type)
                 self._validation_store.save_decision(
                     job_id,
                     {
-                        "status": "published",
+                        "status": "published" if uploaded else "skipped",
                         "published_action": actual_action,
                         "result_count": len(results),
                         "accepted_count": accepted,
@@ -530,10 +578,13 @@ class EvolveServer(EvolveEngineMixin):
                         "mean_score": mean_score,
                     },
                 )
-                summary["published"] += 1
+                if uploaded:
+                    summary["published"] += 1
+                else:
+                    summary["skipped"] += 1
                 records.append(
                     {
-                        "action": "published_after_validation",
+                        "action": "published_after_validation" if uploaded else actual_action,
                         "published_action": actual_action,
                         "skill_name": str(candidate_skill.get("name", "")),
                         "skill_id": self._id_registry.get_or_create(str(candidate_skill.get("name", ""))),
@@ -541,7 +592,7 @@ class EvolveServer(EvolveEngineMixin):
                         "session_ids": list(job.get("session_ids") or []),
                         "rationale": str(job.get("rationale", "") or ""),
                         "source": "validation_publish",
-                        "uploaded": True,
+                        "uploaded": uploaded,
                         "validation_job_id": job_id,
                         "validation_results": {
                             "result_count": len(results),
@@ -688,7 +739,7 @@ class EvolveServer(EvolveEngineMixin):
             record["verification"] = verification
             return record
 
-        actual_action = await self._resolve_and_upload(evolved_skill, action_type)
+        actual_action, uploaded = await self._resolve_and_upload(evolved_skill, action_type)
         logger.info(
             "[EvolveServer] %s skill '%s' (id=%s, v%d)",
             actual_action,
@@ -705,7 +756,7 @@ class EvolveServer(EvolveEngineMixin):
             "rationale": rationale,
             "source": source,
             "edit_summary": evolved_skill.get("edit_summary"),
-            "uploaded": True,
+            "uploaded": uploaded,
             "verification": verification,
         }
 

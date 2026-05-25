@@ -20,6 +20,7 @@ from typing import Any, Collection, Optional
 
 import httpx
 
+from .nacos_versions import _next_version
 from .skill_bundle import (
     bundle_entrypoint_text,
     bundle_file_records,
@@ -48,7 +49,10 @@ class NacosSkillClient:
     ) -> None:
         self.server = str(server or "").rstrip("/")
         if not self.server:
-            raise ValueError("Nacos sharing requires sharing.nacos_server or sharing.endpoint.")
+            raise ValueError(
+                "Nacos skill backend requires sharing.nacos_server "
+                "(legacy sharing.backend=nacos may use sharing.endpoint)."
+            )
         self.namespace_id = str(namespace_id or "public")
         self.access_token = access_token
         self.username = username
@@ -230,29 +234,25 @@ def _nacos_zip_to_bundle(zip_bytes: bytes) -> dict[str, bytes]:
     return bundle
 
 
-def _parse_version_number(version: str | None) -> int:
-    raw = str(version or "").strip()
-    if raw.startswith("v"):
-        raw = raw[1:]
-    try:
-        return int(raw)
-    except ValueError:
-        return 0
+def _nacos_working_version(
+    summary: dict[str, Any],
+    detail: dict[str, Any] | None = None,
+) -> tuple[str, str] | None:
+    for source in (summary, detail or {}):
+        reviewing = str(source.get("reviewingVersion") or "").strip()
+        if reviewing:
+            return "reviewing", reviewing
+    for source in (summary, detail or {}):
+        editing = str(source.get("editingVersion") or "").strip()
+        if editing:
+            return "editing", editing
+    return None
 
 
-def _next_version(summary: dict[str, Any], detail: dict[str, Any] | None = None) -> str:
-    versions: list[str] = []
-    labels = summary.get("labels")
-    if isinstance(labels, dict):
-        versions.extend(str(v) for v in labels.values() if v)
-    for field in ("editingVersion", "reviewingVersion", "version"):
-        if summary.get(field):
-            versions.append(str(summary[field]))
-    for item in (detail or {}).get("versions") or []:
-        if isinstance(item, dict) and item.get("version"):
-            versions.append(str(item["version"]))
-    next_num = max([_parse_version_number(v) for v in versions] or [0]) + 1
-    return f"v{next_num}"
+def _bundle_matches_remote(local_bundle: dict[str, bytes], remote_bundle: dict[str, bytes]) -> bool:
+    if not local_bundle or not remote_bundle:
+        return False
+    return bundle_tree_sha256(local_bundle) == bundle_tree_sha256(remote_bundle)
 
 
 class NacosSkillHub:
@@ -271,8 +271,12 @@ class NacosSkillHub:
 
     @classmethod
     def from_config(cls, config) -> "NacosSkillHub":
+        sharing_backend = str(getattr(config, "sharing_backend", "") or "").strip().lower()
+        server = str(getattr(config, "sharing_nacos_server", "") or "")
+        if not server and sharing_backend == "nacos":
+            server = str(getattr(config, "sharing_endpoint", "") or "")
         client = NacosSkillClient(
-            server=str(getattr(config, "sharing_nacos_server", "") or getattr(config, "sharing_endpoint", "") or ""),
+            server=server,
             namespace_id=str(getattr(config, "sharing_nacos_namespace_id", "") or "public"),
             access_token=str(getattr(config, "sharing_nacos_access_token", "") or ""),
             username=str(getattr(config, "sharing_nacos_username", "") or ""),
@@ -296,6 +300,10 @@ class NacosSkillHub:
         labels = rec.get("labels") if isinstance(rec.get("labels"), dict) else {}
         version = labels.get(self._label)
         zip_bytes = self._client.download_skill_zip(name, version=version, label=self._label)
+        return _nacos_zip_to_bundle(zip_bytes)
+
+    def _download_skill_bundle_version(self, name: str, version: str) -> dict[str, bytes]:
+        zip_bytes = self._client.download_skill_zip(name, version=version, admin=True)
         return _nacos_zip_to_bundle(zip_bytes)
 
     def list_remote(self) -> list[dict[str, Any]]:
@@ -343,17 +351,46 @@ class NacosSkillHub:
 
             bundle_files, _bundle_records, _tree_sha = read_skill_bundle_with_meta(skill_dir)
             remote_rec = remote.get(skill_name)
-            if remote_rec:
+            try:
+                detail = self._client.get_skill(skill_name) if remote_rec else {}
+            except Exception:
+                detail = {}
+            working = _nacos_working_version(remote_rec or {}, detail)
+            if working:
+                status, version = working
+                try:
+                    remote_bundle = self._download_skill_bundle_version(skill_name, version)
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"failed to inspect Nacos {status} version {version} for {skill_name}: {exc}"
+                    ) from exc
+                if _bundle_matches_remote(bundle_files, remote_bundle):
+                    skipped += 1
+                    logger.info(
+                        "[NacosSkillHub] skipped %s: %s version %s already matches",
+                        skill_name,
+                        status,
+                        version,
+                    )
+                    continue
+                if status == "reviewing":
+                    raise RuntimeError(
+                        f"Nacos skill {skill_name} already has reviewing version {version}; "
+                        "finish or reject it before pushing new content."
+                    )
+                target_version = version
+            elif remote_rec:
                 try:
                     remote_bundle = self._download_skill_bundle(skill_name, remote_rec)
-                    if self._local_bundle_matches_remote(skill_dir, remote_bundle):
+                    if _bundle_matches_remote(bundle_files, remote_bundle):
                         skipped += 1
                         continue
                 except Exception as exc:
                     logger.info("[NacosSkillHub] remote comparison skipped for %s: %s", skill_name, exc)
+                target_version = _next_version(remote_rec or {}, detail)
+            else:
+                target_version = _next_version({}, {})
 
-            detail = self._client.get_skill(skill_name) if remote_rec else {}
-            target_version = _next_version(remote_rec or {}, detail)
             zip_bytes = _bundle_to_nacos_zip(skill_name, bundle_files)
             self._client.upload_skill_zip(
                 zip_bytes=zip_bytes,

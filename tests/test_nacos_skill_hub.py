@@ -6,7 +6,6 @@ import httpx
 
 from skillclaw.nacos_skill_hub import NacosSkillClient, NacosSkillHub, _bundle_to_nacos_zip
 
-
 SKILL_MD = """---
 name: demo-skill
 description: Demo skill
@@ -38,11 +37,11 @@ def test_nacos_push_uploads_then_submits_without_publish(tmp_path: Path) -> None
         if request.method == "POST" and request.url.path == "/v3/admin/ai/skills/upload":
             assert request.url.params.get("targetVersion") is None
             assert b'name="targetVersion"' in request.content
-            assert b"v1" in request.content
+            assert b"0.0.1" in request.content
             return _json("demo-skill")
         if request.method == "POST" and request.url.path == "/v3/admin/ai/skills/submit":
-            assert request.content == b"namespaceId=public&skillName=demo-skill&version=v1"
-            return _json("v1")
+            assert request.content == b"namespaceId=public&skillName=demo-skill&version=0.0.1"
+            return _json("0.0.1")
         raise AssertionError(f"unexpected request: {request.method} {request.url}")
 
     client = NacosSkillClient(

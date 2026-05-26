@@ -1428,6 +1428,7 @@ class SkillClawAPIServer:
         self._background_tasks: set[asyncio.Task] = set()  # transient async tasks (upload, submit)
         self._responses_store: dict[str, dict[str, Any]] = {}  # response_id -> stored response/history
         self._session_sweeper_task: Optional[asyncio.Task] = None
+        self._skill_reload_task: Optional[asyncio.Task] = None
         self._session_idle_close_seconds = max(
             0,
             int(getattr(config, "session_idle_close_seconds", _SESSION_IDLE_CLOSE_SECONDS)),
@@ -1439,6 +1440,10 @@ class SkillClawAPIServer:
         self._shutdown_drain_timeout_seconds = max(
             1,
             int(getattr(config, "shutdown_drain_timeout_seconds", _SHUTDOWN_DRAIN_TIMEOUT_SECONDS)),
+        )
+        self._skill_reload_interval_seconds = max(
+            5,
+            int(getattr(config, "sharing_skill_reload_interval_seconds", 30) or 30),
         )
 
         # Session boundary detection for non-OpenClaw agents (QwenPaw, IronClaw, etc.)
@@ -1478,6 +1483,7 @@ class SkillClawAPIServer:
         async def lifespan(_app: FastAPI):
             owner._ready_event.set()
             owner._start_session_idle_sweeper()
+            owner._start_skill_reload_polling()
             try:
                 yield
             finally:
@@ -1909,6 +1915,33 @@ class SkillClawAPIServer:
         else:
             logger.info("[OpenClaw] background drain complete (%d task(s))", len(done))
 
+    def _start_skill_reload_polling(self) -> None:
+        if not self.config.sharing_enabled:
+            return
+        mode = str(getattr(self.config, "sharing_skill_reload_mode", "") or "poll").strip().lower()
+        if mode != "poll":
+            return
+        if self._skill_reload_task is not None and not self._skill_reload_task.done():
+            return
+        self._skill_reload_task = asyncio.create_task(self._skill_reload_poll_loop())
+        self._skill_reload_task.add_done_callback(self._task_done_cb)
+        logger.info(
+            "[SkillHub] skill reload polling enabled interval=%ds",
+            self._skill_reload_interval_seconds,
+        )
+
+    async def _skill_reload_poll_loop(self) -> None:
+        try:
+            while True:
+                await asyncio.sleep(self._skill_reload_interval_seconds)
+                try:
+                    await self._pull_skills_from_cloud()
+                except Exception as exc:
+                    logger.warning("[SkillHub] skill reload poll failed: %s", exc)
+        except asyncio.CancelledError:
+            logger.info("[SkillHub] skill reload polling stopped")
+            raise
+
     async def _drain_active_sessions(self, reason: str) -> None:
         active_ids = self._collect_active_session_ids()
         if not active_ids:
@@ -1918,6 +1951,10 @@ class SkillClawAPIServer:
             await self._close_session(sid, reason=reason)
 
     async def _shutdown_cleanup(self) -> None:
+        if self._skill_reload_task is not None:
+            self._skill_reload_task.cancel()
+            await asyncio.gather(self._skill_reload_task, return_exceptions=True)
+            self._skill_reload_task = None
         if self._session_sweeper_task is not None:
             self._session_sweeper_task.cancel()
             await asyncio.gather(self._session_sweeper_task, return_exceptions=True)

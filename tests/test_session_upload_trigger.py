@@ -92,3 +92,60 @@ async def test_session_snapshot_triggers_evolve_only_after_successful_upload() -
     await server._upload_session_snapshot_and_trigger("session-a", [{"turn_num": 2}])
 
     assert calls == {"upload": 2, "trigger": 1}
+
+
+def test_skill_reload_polling_starts_only_in_poll_mode(monkeypatch) -> None:
+    server = object.__new__(SkillClawAPIServer)
+    server.config = SkillClawConfig(sharing_enabled=True, sharing_skill_reload_mode="poll")
+    server._skill_reload_task = None
+    server._skill_reload_interval_seconds = 30
+    created = []
+
+    class FakeTask:
+        def done(self):
+            return False
+
+        def add_done_callback(self, _callback):
+            return None
+
+    def fake_create_task(coro):
+        created.append(coro)
+        return FakeTask()
+
+    import asyncio
+
+    monkeypatch.setattr(asyncio, "create_task", fake_create_task)
+    server._start_skill_reload_polling()
+
+    assert len(created) == 1
+    created[0].close()
+
+
+def test_skill_reload_polling_does_not_start_when_disabled_or_callback(monkeypatch) -> None:
+    created = []
+
+    class FakeTask:
+        def done(self):
+            return False
+
+    def fake_create_task(coro):
+        created.append(coro)
+        return FakeTask()
+
+    import asyncio
+
+    monkeypatch.setattr(asyncio, "create_task", fake_create_task)
+    for mode in ("off", "callback"):
+        server = object.__new__(SkillClawAPIServer)
+        server.config = SkillClawConfig(sharing_enabled=True, sharing_skill_reload_mode=mode)
+        server._skill_reload_task = None
+        server._skill_reload_interval_seconds = 30
+        server._start_skill_reload_polling()
+
+    server = object.__new__(SkillClawAPIServer)
+    server.config = SkillClawConfig(sharing_enabled=False, sharing_skill_reload_mode="poll")
+    server._skill_reload_task = None
+    server._skill_reload_interval_seconds = 30
+    server._start_skill_reload_polling()
+
+    assert created == []

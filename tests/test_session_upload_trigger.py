@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+import httpx
 
 from skillclaw.api_server import SkillClawAPIServer
 from skillclaw.config import SkillClawConfig
@@ -149,3 +150,41 @@ def test_skill_reload_polling_does_not_start_when_disabled_or_callback(monkeypat
     server._start_skill_reload_polling()
 
     assert created == []
+
+
+@pytest.mark.anyio
+async def test_internal_reload_skills_endpoint_requires_auth_and_pulls(tmp_path) -> None:
+    server = SkillClawAPIServer(
+        SkillClawConfig(
+            proxy_api_key="secret",
+            record_enabled=False,
+            record_dir=str(tmp_path),
+        )
+    )
+    calls = {"pull": 0}
+
+    async def fake_pull(skip_names=None):
+        assert skip_names is None
+        calls["pull"] += 1
+
+    class FakeSkillManager:
+        def get_all_skills(self):
+            return [{"name": "weekly-report"}, {"name": "demo"}]
+
+    server._pull_skills_from_cloud = fake_pull
+    server.skill_manager = FakeSkillManager()
+
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test")
+    try:
+        unauthorized = await client.post("/internal/reload-skills")
+        authorized = await client.post(
+            "/internal/reload-skills",
+            headers={"Authorization": "Bearer secret"},
+        )
+    finally:
+        await client.aclose()
+
+    assert unauthorized.status_code == 401
+    assert authorized.status_code == 200
+    assert authorized.json() == {"ok": True, "skills": 2}
+    assert calls == {"pull": 1}

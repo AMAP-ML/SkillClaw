@@ -136,6 +136,36 @@ class EvolveServer(EvolveEngineMixin):
                 skill["description"] = description
         return skill
 
+    def _wait_nacos_publish(self, name: str, version: str, timeout: float = 30.0) -> bool:
+        """Publish a Nacos skill version and wait for it to go online.
+
+        Nacos v3 runs a publish pipeline on submit. The pipeline must approve
+        before the publish call succeeds. This method polls for approval and
+        retries publish until the version goes online with the latest label.
+        """
+        import time
+
+        deadline = time.monotonic() + timeout
+        published = False
+        while time.monotonic() < deadline:
+            try:
+                detail = self._nacos_skill_client.get_skill(name)
+                labels = detail.get("labels", {}) if detail else {}
+                if labels.get("latest") == version:
+                    return True
+                if not published:
+                    try:
+                        self._nacos_skill_client.publish(name, version, update_latest_label=True)
+                        logger.info("[EvolveServer] Nacos publish accepted for %s %s", name, version)
+                        published = True
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            time.sleep(2.0)
+        logger.warning("[EvolveServer] Nacos publish not confirmed for %s %s within %.0fs", name, version, timeout)
+        return False
+
     def _fetch_skill(self, name: str) -> Optional[str]:
         if self._nacos_skill_client is not None:
             try:
@@ -237,13 +267,25 @@ class EvolveServer(EvolveEngineMixin):
                 overwrite=True,
                 target_version=target_version,
             )
-            self._nacos_skill_client.submit(name, target_version)
+            publish_mode = str(getattr(self.config, "nacos_publish_mode", "") or "review").strip().lower()
+            if publish_mode in {"review", "direct"}:
+                self._nacos_skill_client.submit(name, target_version)
+            publish_confirmed = False
+            if publish_mode == "direct":
+                publish_confirmed = self._wait_nacos_publish(name, target_version)
             logger.info(
-                "[EvolveServer] uploaded and submitted skill %s to Nacos as %s via action=%s",
+                "[EvolveServer] uploaded skill %s to Nacos as %s via action=%s publish_mode=%s",
                 name,
                 target_version,
                 action,
+                publish_mode,
             )
+            if publish_mode == "draft":
+                return "uploaded_draft"
+            if publish_mode == "review":
+                return "uploaded_pending_review"
+            if not publish_confirmed:
+                return "uploaded_pending_publish"
             return "uploaded"
 
         skill_id = self._id_registry.get_or_create(name)
@@ -314,13 +356,13 @@ class EvolveServer(EvolveEngineMixin):
         has_conflict = await self._call_storage(self._detect_conflict, name, skill)
         if not has_conflict:
             upload_status = await self._call_storage(self._upload_skill, skill, action_type)
-            return (action_type, True) if upload_status == "uploaded" else (upload_status, False)
+            return self._upload_status_to_action(action_type, upload_status)
 
         logger.info("[EvolveServer] conflict detected for '%s' - merging", name)
         existing_md = await self._call_storage(self._fetch_skill, name)
         if not existing_md:
             upload_status = await self._call_storage(self._upload_skill, skill, action_type)
-            return (action_type, True) if upload_status == "uploaded" else (upload_status, False)
+            return self._upload_status_to_action(action_type, upload_status)
 
         existing_skill = parse_skill_content(name, existing_md)
         existing_skill = self._overlay_manifest_metadata(
@@ -332,11 +374,23 @@ class EvolveServer(EvolveEngineMixin):
         if merged and merged.get("name"):
             merged["name"] = name
             upload_status = await self._call_storage(self._upload_skill, merged, "merge")
-            return ("merge", True) if upload_status == "uploaded" else (upload_status, False)
+            return self._upload_status_to_action("merge", upload_status)
 
         logger.warning("[EvolveServer] merge failed for '%s' - keeping incoming version", name)
         upload_status = await self._call_storage(self._upload_skill, skill, action_type)
-        return (action_type, True) if upload_status == "uploaded" else (upload_status, False)
+        return self._upload_status_to_action(action_type, upload_status)
+
+    @staticmethod
+    def _upload_status_to_action(action_type: str, upload_status: str) -> tuple[str, bool]:
+        if upload_status == "uploaded":
+            return action_type, True
+        if upload_status == "uploaded_pending_review":
+            return f"{action_type}_pending_review", False
+        if upload_status == "uploaded_pending_publish":
+            return f"{action_type}_pending_publish", False
+        if upload_status == "uploaded_draft":
+            return f"{action_type}_draft", False
+        return upload_status, False
 
     def _empty_judge_summary(self) -> dict[str, Any]:
         return {

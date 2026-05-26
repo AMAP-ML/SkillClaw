@@ -44,6 +44,7 @@ class FakeNacosClient:
         self.downloads = downloads
         self.uploads: list[dict] = []
         self.submits: list[tuple[str, str]] = []
+        self.publishes: list[dict] = []
         self.download_calls: list[dict] = []
 
     def list_skills(self) -> list[dict]:
@@ -73,6 +74,15 @@ class FakeNacosClient:
     def submit(self, name: str, version: str) -> str:
         self.submits.append((name, version))
         return version
+
+    def publish(self, name: str, version: str, *, update_latest_label: bool = True) -> None:
+        self.publishes.append(
+            {
+                "name": name,
+                "version": version,
+                "update_latest_label": update_latest_label,
+            }
+        )
 
 
 def _write_skill(root: Path, body: str = SKILL_MD) -> None:
@@ -217,9 +227,126 @@ def test_evolve_upload_creates_version_when_nacos_skill_has_no_versions() -> Non
         "create_skill",
     )
 
+    assert status == "uploaded_pending_review"
+    assert client.uploads[0]["target_version"] == "0.0.1"
+    assert client.submits == [("demo-skill", "0.0.1")]
+    assert client.publishes == []
+
+
+def test_evolve_upload_leaves_nacos_version_as_draft_in_draft_mode() -> None:
+    client = FakeNacosClient(
+        [{"name": "demo-skill", "labels": {}, "versions": [], "editingVersion": None, "reviewingVersion": None}],
+        {},
+    )
+    server = EvolveServer.__new__(EvolveServer)
+    server.config = EvolveServerConfig(skill_storage_backend="nacos", nacos_publish_mode="draft")
+    server._nacos_skill_client = client
+    server._load_remote_skill_record = lambda name: client.get_skill(name)
+
+    status = server._upload_skill(
+        {"name": "demo-skill", "description": "Demo skill", "content": "New content."},
+        "create_skill",
+    )
+
+    assert status == "uploaded_draft"
+    assert client.uploads[0]["target_version"] == "0.0.1"
+    assert client.submits == []
+    assert client.publishes == []
+
+
+def test_evolve_upload_publishes_nacos_version_in_direct_mode() -> None:
+    client = FakeNacosClient(
+        [{"name": "demo-skill", "labels": {}, "versions": [], "editingVersion": None, "reviewingVersion": None}],
+        {},
+    )
+    server = EvolveServer.__new__(EvolveServer)
+    server.config = EvolveServerConfig(skill_storage_backend="nacos", nacos_publish_mode="direct")
+    server._nacos_skill_client = client
+    server._load_remote_skill_record = lambda name: client.get_skill(name)
+    server._wait_nacos_publish = lambda name, version: True
+
+    status = server._upload_skill(
+        {"name": "demo-skill", "description": "Demo skill", "content": "New content."},
+        "create_skill",
+    )
+
     assert status == "uploaded"
     assert client.uploads[0]["target_version"] == "0.0.1"
     assert client.submits == [("demo-skill", "0.0.1")]
+
+
+def test_evolve_upload_marks_direct_nacos_publish_without_confirmation_as_pending() -> None:
+    client = FakeNacosClient(
+        [{"name": "demo-skill", "labels": {}, "versions": [], "editingVersion": None, "reviewingVersion": None}],
+        {},
+    )
+    server = EvolveServer.__new__(EvolveServer)
+    server.config = EvolveServerConfig(skill_storage_backend="nacos", nacos_publish_mode="direct")
+    server._nacos_skill_client = client
+    server._load_remote_skill_record = lambda name: client.get_skill(name)
+    server._wait_nacos_publish = lambda name, version: False
+
+    status = server._upload_skill(
+        {"name": "demo-skill", "description": "Demo skill", "content": "New content."},
+        "create_skill",
+    )
+
+    assert status == "uploaded_pending_publish"
+    assert client.uploads[0]["target_version"] == "0.0.1"
+    assert client.submits == [("demo-skill", "0.0.1")]
+
+
+@pytest.mark.anyio
+async def test_evolve_resolve_marks_nacos_review_upload_as_not_runtime_visible() -> None:
+    client = FakeNacosClient(
+        [{"name": "demo-skill", "labels": {}, "versions": [], "editingVersion": None, "reviewingVersion": None}],
+        {},
+    )
+    server = EvolveServer.__new__(EvolveServer)
+    server.config = EvolveServerConfig(skill_storage_backend="nacos", nacos_publish_mode="review")
+    server._nacos_skill_client = client
+    server._load_remote_skill_record = lambda name: client.get_skill(name)
+
+    async def fake_call_storage(func, *args):
+        return func(*args)
+
+    server._call_storage = fake_call_storage
+    server._detect_conflict = lambda _name, _skill: False
+
+    action, uploaded = await server._resolve_and_upload(
+        {"name": "demo-skill", "description": "Demo skill", "content": "New content."},
+        "create_skill",
+    )
+
+    assert action == "create_skill_pending_review"
+    assert uploaded is False
+
+
+@pytest.mark.anyio
+async def test_evolve_resolve_marks_unconfirmed_nacos_direct_publish_as_not_runtime_visible() -> None:
+    client = FakeNacosClient(
+        [{"name": "demo-skill", "labels": {}, "versions": [], "editingVersion": None, "reviewingVersion": None}],
+        {},
+    )
+    server = EvolveServer.__new__(EvolveServer)
+    server.config = EvolveServerConfig(skill_storage_backend="nacos", nacos_publish_mode="direct")
+    server._nacos_skill_client = client
+    server._load_remote_skill_record = lambda name: client.get_skill(name)
+    server._wait_nacos_publish = lambda name, version: False
+
+    async def fake_call_storage(func, *args):
+        return func(*args)
+
+    server._call_storage = fake_call_storage
+    server._detect_conflict = lambda _name, _skill: False
+
+    action, uploaded = await server._resolve_and_upload(
+        {"name": "demo-skill", "description": "Demo skill", "content": "New content."},
+        "create_skill",
+    )
+
+    assert action == "create_skill_pending_publish"
+    assert uploaded is False
 
 
 def test_evolve_fetch_returns_none_when_nacos_skill_has_no_published_label() -> None:

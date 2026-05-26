@@ -127,6 +127,55 @@ def test_nacos_pull_downloads_latest_zip(tmp_path: Path) -> None:
     assert (restored / "demo-skill" / "references" / "guide.md").read_bytes() == b"hello\n"
 
 
+def test_nacos_pull_downloads_largest_published_version_without_latest_label(tmp_path: Path) -> None:
+    zip_bytes = _bundle_to_nacos_zip("demo-skill", {"SKILL.md": SKILL_MD.encode("utf-8")})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v3/admin/ai/skills/list":
+            return _json(
+                {
+                    "totalCount": 1,
+                    "pageItems": [
+                        {
+                            "name": "demo-skill",
+                            "description": "Demo skill",
+                            "labels": {},
+                        }
+                    ],
+                }
+            )
+        if request.url.path == "/v3/admin/ai/skills":
+            return _json(
+                {
+                    "name": "demo-skill",
+                    "labels": {},
+                    "versions": [
+                        {"version": "0.0.2", "status": "published"},
+                        {"version": "0.0.4", "status": "published"},
+                        {"version": "0.0.9", "status": "reviewed"},
+                    ],
+                }
+            )
+        if request.url.path == "/v3/client/ai/skills":
+            assert request.url.params["name"] == "demo-skill"
+            assert request.url.params["version"] == "0.0.4"
+            return httpx.Response(200, content=zip_bytes)
+        raise AssertionError(f"unexpected request: {request.method} {request.url}")
+
+    client = NacosSkillClient(
+        server="http://nacos.test",
+        namespace_id="public",
+        transport=httpx.MockTransport(handler),
+    )
+    hub = NacosSkillHub(client=client)
+    restored = tmp_path / "restored"
+
+    result = hub.pull_skills(str(restored))
+
+    assert result["downloaded"] == 1
+    assert (restored / "demo-skill" / "SKILL.md").read_text(encoding="utf-8") == SKILL_MD
+
+
 def test_nacos_pull_skips_unpublished_skill_and_continues(tmp_path: Path) -> None:
     zip_bytes = _bundle_to_nacos_zip("demo-skill", {"SKILL.md": SKILL_MD.encode("utf-8")})
 

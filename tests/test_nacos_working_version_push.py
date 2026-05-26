@@ -118,6 +118,30 @@ def test_push_fails_when_reviewing_version_has_different_content(tmp_path: Path)
     assert client.submits == []
 
 
+def test_push_fails_when_reviewed_version_has_different_content(tmp_path: Path) -> None:
+    skills_dir = tmp_path / "skills"
+    _write_skill(skills_dir, UPDATED_SKILL_MD)
+    client = FakeNacosClient(
+        [
+            {
+                "name": "demo-skill",
+                "labels": {},
+                "versions": [{"version": "0.0.3", "status": "reviewed"}],
+            }
+        ],
+        {("demo-skill", "0.0.3"): _zip(SKILL_MD)},
+    )
+
+    with pytest.raises(RuntimeError, match="already has reviewing version 0.0.3"):
+        NacosSkillHub(client=client).push_skills(str(skills_dir))
+
+    assert client.download_calls == [
+        {"name": "demo-skill", "version": "0.0.3", "label": "latest", "admin": True}
+    ]
+    assert client.uploads == []
+    assert client.submits == []
+
+
 def test_push_overwrites_existing_editing_version(tmp_path: Path) -> None:
     skills_dir = tmp_path / "skills"
     _write_skill(skills_dir, UPDATED_SKILL_MD)
@@ -155,6 +179,55 @@ def test_evolve_upload_skips_existing_editing_version_with_different_content() -
     assert client.submits == []
 
 
+def test_evolve_upload_skips_existing_reviewed_version_with_different_content() -> None:
+    client = FakeNacosClient(
+        [
+            {
+                "name": "demo-skill",
+                "labels": {},
+                "versions": [{"version": "0.0.3", "status": "reviewed"}],
+            }
+        ],
+        {("demo-skill", "0.0.3"): _zip(SKILL_MD)},
+    )
+    server = EvolveServer.__new__(EvolveServer)
+    server.config = EvolveServerConfig(skill_storage_backend="nacos")
+    server._nacos_skill_client = client
+    server._load_remote_skill_record = lambda name: client.get_skill(name)
+
+    status = server._upload_skill(
+        {"name": "demo-skill", "description": "Demo skill", "content": "Updated content."},
+        "improve",
+    )
+
+    assert status == "skipped_existing_reviewing"
+    assert client.download_calls == [
+        {"name": "demo-skill", "version": "0.0.3", "label": "latest", "admin": True}
+    ]
+    assert client.uploads == []
+    assert client.submits == []
+
+
+def test_evolve_upload_creates_version_when_nacos_skill_has_no_versions() -> None:
+    client = FakeNacosClient(
+        [{"name": "demo-skill", "labels": {}, "versions": [], "editingVersion": None, "reviewingVersion": None}],
+        {},
+    )
+    server = EvolveServer.__new__(EvolveServer)
+    server.config = EvolveServerConfig(skill_storage_backend="nacos")
+    server._nacos_skill_client = client
+    server._load_remote_skill_record = lambda name: client.get_skill(name)
+
+    status = server._upload_skill(
+        {"name": "demo-skill", "description": "Demo skill", "content": "New content."},
+        "create_skill",
+    )
+
+    assert status == "uploaded"
+    assert client.uploads[0]["target_version"] == "0.0.1"
+    assert client.submits == [("demo-skill", "0.0.1")]
+
+
 def test_evolve_fetch_returns_none_when_nacos_skill_has_no_published_label() -> None:
     client = FakeNacosClient(
         [{"name": "demo-skill", "labels": {}, "editingVersion": None, "reviewingVersion": None}],
@@ -186,4 +259,62 @@ def test_evolve_fetch_downloads_nacos_published_label_version() -> None:
     assert content == SKILL_MD
     assert client.download_calls == [
         {"name": "demo-skill", "version": "0.0.3", "label": "latest", "admin": False}
+    ]
+
+
+def test_evolve_fetch_downloads_reviewed_version_as_reviewing_working_version() -> None:
+    client = FakeNacosClient(
+        [
+            {
+                "name": "demo-skill",
+                "labels": {},
+                "editingVersion": None,
+                "reviewingVersion": None,
+                "versions": [
+                    {"version": "0.0.3", "status": "reviewed"},
+                    {"version": "0.0.2", "status": "published"},
+                ],
+            }
+        ],
+        {("demo-skill", "0.0.3"): _zip(SKILL_MD)},
+    )
+    server = EvolveServer.__new__(EvolveServer)
+    server.config = EvolveServerConfig(skill_storage_backend="nacos", nacos_label="latest")
+    server._nacos_skill_client = client
+    server._load_remote_skill_record = lambda name: client.get_skill(name)
+
+    content = server._fetch_skill("demo-skill")
+
+    assert content == SKILL_MD
+    assert client.download_calls == [
+        {"name": "demo-skill", "version": "0.0.3", "label": "latest", "admin": True}
+    ]
+
+
+def test_evolve_fetch_downloads_largest_published_version_when_latest_label_missing() -> None:
+    client = FakeNacosClient(
+        [
+            {
+                "name": "demo-skill",
+                "labels": {},
+                "editingVersion": None,
+                "reviewingVersion": None,
+                "versions": [
+                    {"version": "0.0.2", "status": "published"},
+                    {"version": "0.0.4", "status": "published"},
+                ],
+            }
+        ],
+        {("demo-skill", "0.0.4"): _zip(SKILL_MD)},
+    )
+    server = EvolveServer.__new__(EvolveServer)
+    server.config = EvolveServerConfig(skill_storage_backend="nacos", nacos_label="latest")
+    server._nacos_skill_client = client
+    server._load_remote_skill_record = lambda name: client.get_skill(name)
+
+    content = server._fetch_skill("demo-skill")
+
+    assert content == SKILL_MD
+    assert client.download_calls == [
+        {"name": "demo-skill", "version": "0.0.4", "label": "latest", "admin": False}
     ]

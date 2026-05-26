@@ -20,7 +20,7 @@ from typing import Any, Collection, Optional
 
 import httpx
 
-from .nacos_versions import _next_version
+from .nacos_versions import _next_version, _parse_semver, _parse_v_version
 from .skill_bundle import (
     bundle_entrypoint_text,
     bundle_file_records,
@@ -31,6 +31,8 @@ from .skill_bundle import (
 from .skill_hub import _is_hermes_skill_root, _skill_dir_for_root
 
 logger = logging.getLogger(__name__)
+_PUBLISHED_VERSION_STATUSES = {"published", "online", "released"}
+_REVIEW_VERSION_STATUSES = {"reviewing", "reviewed"}
 
 
 class NacosSkillClient:
@@ -234,6 +236,24 @@ def _nacos_zip_to_bundle(zip_bytes: bytes) -> dict[str, bytes]:
     return bundle
 
 
+def _largest_nacos_version(versions: list[str]) -> str | None:
+    semver_versions = [
+        (parsed, version)
+        for version in versions
+        if (parsed := _parse_semver(version)) is not None
+    ]
+    if semver_versions:
+        return max(semver_versions, key=lambda item: item[0])[1]
+    v_versions = [
+        (parsed, version)
+        for version in versions
+        if (parsed := _parse_v_version(version)) is not None
+    ]
+    if v_versions:
+        return max(v_versions, key=lambda item: item[0])[1]
+    return max(versions) if versions else None
+
+
 def _nacos_working_version(
     summary: dict[str, Any],
     detail: dict[str, Any] | None = None,
@@ -242,6 +262,17 @@ def _nacos_working_version(
         reviewing = str(source.get("reviewingVersion") or "").strip()
         if reviewing:
             return "reviewing", reviewing
+    review_versions: list[str] = []
+    for item in (detail or {}).get("versions") or []:
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status") or "").strip().lower()
+        version = str(item.get("version") or "").strip()
+        if version and status in _REVIEW_VERSION_STATUSES:
+            review_versions.append(version)
+    review_version = _largest_nacos_version(review_versions)
+    if review_version:
+        return "reviewing", review_version
     for source in (summary, detail or {}):
         editing = str(source.get("editingVersion") or "").strip()
         if editing:
@@ -262,6 +293,17 @@ def _nacos_published_version(
             version = str(labels.get(target_label) or "").strip()
             if version:
                 return version
+    published_versions: list[str] = []
+    for item in (detail or {}).get("versions") or []:
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status") or "").strip().lower()
+        version = str(item.get("version") or "").strip()
+        if version and status in _PUBLISHED_VERSION_STATUSES:
+            published_versions.append(version)
+    if not published_versions:
+        return None
+    return _largest_nacos_version(published_versions)
     return None
 
 
@@ -312,8 +354,18 @@ class NacosSkillHub:
         local_bundle, _records, local_sha = read_skill_bundle_with_meta(skill_dir)
         return bool(local_bundle) and local_sha == bundle_tree_sha256(remote_bundle)
 
-    def _download_skill_bundle(self, name: str, rec: dict[str, Any]) -> dict[str, bytes]:
-        version = _nacos_published_version(rec, label=self._label)
+    def _download_skill_bundle(
+        self,
+        name: str,
+        rec: dict[str, Any],
+        detail: dict[str, Any] | None = None,
+    ) -> dict[str, bytes]:
+        if detail is None:
+            try:
+                detail = self._client.get_skill(name)
+            except Exception:
+                detail = {}
+        version = _nacos_published_version(rec, detail, label=self._label)
         if not version:
             raise FileNotFoundError(f"Nacos skill {name} has no published {self._label} version")
         zip_bytes = self._client.download_skill_zip(name, version=version, label=self._label)
@@ -476,7 +528,11 @@ class NacosSkillHub:
             if name in skip_set and os.path.exists(os.path.join(target_dir, "SKILL.md")):
                 skipped += 1
                 continue
-            if not _nacos_published_version(rec, label=self._label):
+            try:
+                detail = self._client.get_skill(name)
+            except Exception:
+                detail = {}
+            if not _nacos_published_version(rec, detail, label=self._label):
                 skipped += 1
                 logger.info(
                     "[NacosSkillHub] skipped %s: no published %s version",
@@ -485,7 +541,7 @@ class NacosSkillHub:
                 )
                 continue
             try:
-                bundle = self._download_skill_bundle(name, rec)
+                bundle = self._download_skill_bundle(name, rec, detail)
             except Exception as exc:
                 failed += 1
                 failed_names.append(name)

@@ -1497,6 +1497,17 @@ class SkillClawAPIServer:
         async def healthz():
             return {"ok": True}
 
+        @app.post("/internal/reload-skills")
+        async def reload_skills(
+            request: Request,
+            authorization: Optional[str] = Header(default=None),
+        ):
+            owner: SkillClawAPIServer = request.app.state.owner
+            await owner._check_auth(authorization)
+            await owner._pull_skills_from_cloud()
+            skill_count = len(owner.skill_manager.get_all_skills()) if owner.skill_manager else 0
+            return {"ok": True, "skills": skill_count}
+
         @app.get("/v1/models")
         async def list_models(
             request: Request,
@@ -1931,13 +1942,22 @@ class SkillClawAPIServer:
         )
 
     async def _skill_reload_poll_loop(self) -> None:
+        consecutive_failures = 0
         try:
             while True:
-                await asyncio.sleep(self._skill_reload_interval_seconds)
+                jitter = random.uniform(0, self._skill_reload_interval_seconds * 0.1)
+                backoff = min(consecutive_failures * 5.0, 60.0)
+                await asyncio.sleep(self._skill_reload_interval_seconds + jitter + backoff)
                 try:
                     await self._pull_skills_from_cloud()
+                    consecutive_failures = 0
                 except Exception as exc:
-                    logger.warning("[SkillHub] skill reload poll failed: %s", exc)
+                    consecutive_failures += 1
+                    logger.warning(
+                        "[SkillHub] skill reload poll failed (streak=%d): %s",
+                        consecutive_failures,
+                        exc,
+                    )
         except asyncio.CancelledError:
             logger.info("[SkillHub] skill reload polling stopped")
             raise
@@ -2835,14 +2855,19 @@ class SkillClawAPIServer:
         url = str(getattr(self.config, "evolve_server_url", "") or "").strip().rstrip("/")
         if not url:
             return
-        try:
-            import httpx
+        import httpx
 
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                await client.post(f"{url}/trigger")
-            logger.info("[SkillHub] triggered evolve server: %s", url)
-        except Exception as e:
-            logger.warning("[SkillHub] evolve trigger failed: %s", e)
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    await client.post(f"{url}/trigger")
+                logger.info("[SkillHub] triggered evolve server: %s", url)
+                return
+            except Exception as e:
+                if attempt < 2:
+                    await asyncio.sleep(1.0 * (attempt + 1))
+                else:
+                    logger.warning("[SkillHub] evolve trigger failed after 3 attempts: %s", e)
 
     # ------------------------------------------------------------------ #
     # Skill pull (cloud -> local)                                          #

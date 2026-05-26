@@ -984,7 +984,33 @@ class EvolveServer(EvolveEngineMixin):
             queued_candidates,
             elapsed,
         )
+        if uploaded_skills > 0:
+            await self._notify_proxy_reload()
         return summary
+
+    async def _notify_proxy_reload(self) -> None:
+        mode = str(getattr(self.config, "skill_reload_mode", "") or "poll").strip().lower()
+        url = str(getattr(self.config, "proxy_reload_url", "") or "").strip().rstrip("/")
+        if mode != "callback" or not url:
+            return
+        headers: dict[str, str] = {}
+        api_key = str(getattr(self.config, "proxy_reload_api_key", "") or "")
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        import httpx
+
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.post(f"{url}/internal/reload-skills", headers=headers)
+                    resp.raise_for_status()
+                logger.info("[EvolveServer] notified proxy to reload skills: %s", url)
+                return
+            except Exception as exc:
+                if attempt < 2:
+                    await asyncio.sleep(1.0 * (attempt + 1))
+                else:
+                    logger.warning("[EvolveServer] proxy reload notify failed after 3 attempts: %s", exc)
 
     async def run_periodic(self) -> None:
         self._running = True

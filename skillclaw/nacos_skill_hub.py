@@ -249,6 +249,22 @@ def _nacos_working_version(
     return None
 
 
+def _nacos_published_version(
+    summary: dict[str, Any],
+    detail: dict[str, Any] | None = None,
+    *,
+    label: str = "latest",
+) -> str | None:
+    target_label = str(label or "latest")
+    for source in (summary, detail or {}):
+        labels = source.get("labels")
+        if isinstance(labels, dict):
+            version = str(labels.get(target_label) or "").strip()
+            if version:
+                return version
+    return None
+
+
 def _bundle_matches_remote(local_bundle: dict[str, bytes], remote_bundle: dict[str, bytes]) -> bool:
     if not local_bundle or not remote_bundle:
         return False
@@ -297,8 +313,9 @@ class NacosSkillHub:
         return bool(local_bundle) and local_sha == bundle_tree_sha256(remote_bundle)
 
     def _download_skill_bundle(self, name: str, rec: dict[str, Any]) -> dict[str, bytes]:
-        labels = rec.get("labels") if isinstance(rec.get("labels"), dict) else {}
-        version = labels.get(self._label)
+        version = _nacos_published_version(rec, label=self._label)
+        if not version:
+            raise FileNotFoundError(f"Nacos skill {name} has no published {self._label} version")
         zip_bytes = self._client.download_skill_zip(name, version=version, label=self._label)
         return _nacos_zip_to_bundle(zip_bytes)
 
@@ -458,6 +475,14 @@ class NacosSkillHub:
             target_dir = _skill_dir_for_root(skills_dir, name, category)
             if name in skip_set and os.path.exists(os.path.join(target_dir, "SKILL.md")):
                 skipped += 1
+                continue
+            if not _nacos_published_version(rec, label=self._label):
+                skipped += 1
+                logger.info(
+                    "[NacosSkillHub] skipped %s: no published %s version",
+                    name,
+                    self._label,
+                )
                 continue
             try:
                 bundle = self._download_skill_bundle(name, rec)

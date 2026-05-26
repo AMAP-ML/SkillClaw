@@ -139,7 +139,11 @@ class EvolveServer(EvolveEngineMixin):
     def _fetch_skill(self, name: str) -> Optional[str]:
         if self._nacos_skill_client is not None:
             try:
-                from skillclaw.nacos_skill_hub import _nacos_working_version, _nacos_zip_to_bundle
+                from skillclaw.nacos_skill_hub import (
+                    _nacos_published_version,
+                    _nacos_working_version,
+                    _nacos_zip_to_bundle,
+                )
 
                 record = self._load_remote_skill_record(name) or {}
                 try:
@@ -151,12 +155,19 @@ class EvolveServer(EvolveEngineMixin):
                     _status, version = working
                     zip_bytes = self._nacos_skill_client.download_skill_zip(name, version=version, admin=True)
                 else:
-                    labels = record.get("labels") if isinstance(record.get("labels"), dict) else {}
-                    version = labels.get(str(getattr(self.config, "nacos_label", "") or "latest"))
+                    label = str(getattr(self.config, "nacos_label", "") or "latest")
+                    version = _nacos_published_version(record, detail, label=label)
+                    if not version:
+                        logger.info(
+                            "[EvolveServer] Nacos skill %s has no published %s version",
+                            name,
+                            label,
+                        )
+                        return None
                     zip_bytes = self._nacos_skill_client.download_skill_zip(
                         name,
                         version=version,
-                        label=str(getattr(self.config, "nacos_label", "") or "latest"),
+                        label=label,
                     )
                 bundle = _nacos_zip_to_bundle(zip_bytes)
                 data = bundle.get("SKILL.md")

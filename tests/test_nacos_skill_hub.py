@@ -127,7 +127,7 @@ def test_nacos_pull_downloads_latest_zip(tmp_path: Path) -> None:
     assert (restored / "demo-skill" / "references" / "guide.md").read_bytes() == b"hello\n"
 
 
-def test_nacos_pull_skips_failed_download_and_continues(tmp_path: Path) -> None:
+def test_nacos_pull_skips_unpublished_skill_and_continues(tmp_path: Path) -> None:
     zip_bytes = _bundle_to_nacos_zip("demo-skill", {"SKILL.md": SKILL_MD.encode("utf-8")})
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -150,8 +150,6 @@ def test_nacos_pull_skips_failed_download_and_continues(tmp_path: Path) -> None:
                 }
             )
         if request.url.path == "/v3/client/ai/skills":
-            if request.url.params["name"] == "broken-skill":
-                return httpx.Response(404)
             assert request.url.params["name"] == "demo-skill"
             return httpx.Response(200, content=zip_bytes)
         raise AssertionError(f"unexpected request: {request.method} {request.url}")
@@ -167,7 +165,8 @@ def test_nacos_pull_skips_failed_download_and_continues(tmp_path: Path) -> None:
     result = hub.pull_skills(str(restored))
 
     assert result["downloaded"] == 1
-    assert result["failed"] == 1
-    assert result["failed_names"] == ["broken-skill"]
+    assert result["skipped"] == 1
+    assert result["failed"] == 0
+    assert result["failed_names"] == []
     assert (restored / "demo-skill" / "SKILL.md").read_text(encoding="utf-8") == SKILL_MD
     assert not (restored / "broken-skill").exists()

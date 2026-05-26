@@ -995,7 +995,6 @@ def inspect_opencode_config(cfg: "SkillClawConfig") -> dict[str, object]:
     config_path = _OPENCODE_CONFIG_PATH
     expected_model = cfg.served_model_name or cfg.llm_model_id or "skillclaw-model"
     expected_base_url = f"http://127.0.0.1:{cfg.proxy_port}/v1"
-    expected_api_key = cfg.proxy_api_key or "skillclaw"
     expected_skills_dir = Path(
         str(getattr(cfg, "skills_dir", "") or _OPENCODE_SKILLS_DIR)
     ).expanduser()

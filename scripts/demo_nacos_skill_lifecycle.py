@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# ruff: noqa: I001
 """Demo SkillClaw's Nacos-backed skill lifecycle without a real Nacos server.
 
 The demo uses httpx.MockTransport to show the exact lifecycle SkillClaw now
@@ -13,8 +14,8 @@ drives against Nacos:
 from __future__ import annotations
 
 import tempfile
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import httpx
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import copy
 import json
 import logging
 import os
@@ -2387,6 +2388,7 @@ class SkillClawAPIServer:
                     "prm_score": None,
                 }
             )
+            self._maybe_upload_session_snapshot(session_id, turn_num)
             self._pending_turn_data.setdefault(session_id, {})[turn_num] = {
                 "prompt_text": prompt_text,
                 "response_text": response_text,
@@ -2736,7 +2738,7 @@ class SkillClawAPIServer:
         self,
         session_id: str,
         turns: list[dict],
-    ) -> None:
+    ) -> bool:
         """Upload the complete session turn records to cloud storage.
 
         Session data and skill data live in *separate* cloud paths so they
@@ -2753,7 +2755,7 @@ class SkillClawAPIServer:
                     "[SkillHub] session remote upload skipped: no local/OSS/S3 storage configured "
                     "(skill registry may still use Nacos)"
                 )
-                return
+                return False
             session_payload = {
                 "session_id": session_id,
                 "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
@@ -2771,8 +2773,39 @@ class SkillClawAPIServer:
                 len(turns),
                 len(content),
             )
+            return True
         except Exception as e:
             logger.warning("[SkillHub] session upload failed: %s", e)
+            return False
+
+    def _maybe_upload_session_snapshot(self, session_id: str, turn_num: int) -> None:
+        interval = max(0, int(getattr(self.config, "sharing_session_upload_interval", 0) or 0))
+        if not self.config.sharing_enabled or interval <= 0:
+            return
+        if turn_num <= 0 or turn_num % interval != 0:
+            return
+        turns = copy.deepcopy(self._session_turns.get(session_id, []))
+        if not turns:
+            return
+        self._safe_create_task(self._upload_session_snapshot_and_trigger(session_id, turns))
+
+    async def _upload_session_snapshot_and_trigger(self, session_id: str, turns: list[dict]) -> None:
+        uploaded = await self._upload_session_data(session_id, turns)
+        if uploaded:
+            await self._trigger_evolve()
+
+    async def _trigger_evolve(self) -> None:
+        url = str(getattr(self.config, "evolve_server_url", "") or "").strip().rstrip("/")
+        if not url:
+            return
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                await client.post(f"{url}/trigger")
+            logger.info("[SkillHub] triggered evolve server: %s", url)
+        except Exception as e:
+            logger.warning("[SkillHub] evolve trigger failed: %s", e)
 
     # ------------------------------------------------------------------ #
     # Skill pull (cloud -> local)                                          #

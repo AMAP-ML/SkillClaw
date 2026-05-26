@@ -60,7 +60,7 @@ compact format. Each file contains:
   - `mean_score`: average ORM score across rollouts
   - `success_count` / `fail_count`: how many rollouts passed / failed
   - `stability`: `"all_success"`, `"all_fail"`, or `"unstable"`
-- `_skills_referenced`: list of skill names the agent read or was injected
+- `_skills_referenced`: list of skill names the agent concretely read or modified
 - `_avg_prm`: mean PRM score across all turns (0.0–1.0; higher = better)
 - `_has_tool_errors`: whether any tool call failed during the session
 - `_trajectory`: **structured step-by-step trace** of the agent's actions.

@@ -3,6 +3,7 @@ from __future__ import annotations
 from evolve_server.core.config import EvolveServerConfig
 from skillclaw.config import SkillClawConfig
 from skillclaw.config_store import ConfigStore
+from skillclaw.skill_hub import SkillHub
 
 
 def test_skill_backend_overrides_skill_storage_without_changing_session_storage(monkeypatch) -> None:
@@ -51,6 +52,31 @@ def test_skill_backend_empty_keeps_legacy_nacos_backend_behavior(monkeypatch) ->
     assert evolve_config.skill_reload_mode == "poll"
     assert evolve_config.storage_backend == ""
     assert evolve_config.storage_endpoint == ""
+
+
+def test_nacos_backend_uses_local_root_for_session_object_storage(tmp_path) -> None:
+    cfg = SkillClawConfig(
+        sharing_backend="nacos",
+        sharing_endpoint="http://legacy-nacos.test",
+        sharing_local_root=str(tmp_path / "share"),
+        sharing_group_id="team-a",
+    )
+
+    hub = SkillHub.object_storage_from_config(cfg)
+
+    assert hub is not None
+    hub._bucket.put_object("team-a/sessions/demo.json", b"{}")
+    assert (tmp_path / "share" / "team-a" / "sessions" / "demo.json").read_text() == "{}"
+
+
+def test_nacos_backend_without_local_root_has_no_session_object_storage() -> None:
+    cfg = SkillClawConfig(
+        sharing_backend="nacos",
+        sharing_endpoint="http://legacy-nacos.test",
+        sharing_group_id="team-a",
+    )
+
+    assert SkillHub.object_storage_from_config(cfg) is None
 
 
 def test_config_store_reads_skill_backend() -> None:

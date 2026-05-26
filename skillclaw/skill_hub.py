@@ -128,6 +128,8 @@ class SkillHub:
         backend = str(getattr(config, "sharing_session_backend", "") or "").strip().lower()
         if not backend and sharing_backend != "nacos":
             backend = sharing_backend
+        if not backend and sharing_backend == "nacos" and str(getattr(config, "sharing_local_root", "") or ""):
+            backend = "local"
 
         endpoint = str(getattr(config, "sharing_endpoint", "") or "")
         bucket = str(getattr(config, "sharing_bucket", "") or "")

@@ -15,6 +15,8 @@ from pathlib import Path
 _PACKAGE_DIR = Path(__file__).resolve().parent
 _DEFAULT_AGENT_EVOLVE_BASE_URL = "https://api.openai.com/v1"
 _DEFAULT_AGENT_EVOLVE_MODEL = "gpt-5.4"
+_NACOS_PUBLISH_MODES = {"draft", "review", "direct"}
+_SKILL_RELOAD_MODES = {"off", "poll", "callback"}
 
 
 def _load_dotenv() -> None:
@@ -58,6 +60,11 @@ def _infer_storage_backend(endpoint: str, bucket: str, local_root: str) -> str:
     if endpoint or bucket:
         return "s3"
     return ""
+
+
+def _normalize_choice(value: str, allowed: set[str], default: str) -> str:
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in allowed else default
 
 
 @dataclass
@@ -113,6 +120,10 @@ class EvolveServerConfig:
     nacos_username: str = ""
     nacos_password: str = ""
     nacos_label: str = "latest"
+    nacos_publish_mode: str = "review"
+    skill_reload_mode: str = "poll"
+    proxy_reload_url: str = ""
+    proxy_reload_api_key: str = ""
 
     # Scheduling
     interval_seconds: int = 600
@@ -139,6 +150,8 @@ class EvolveServerConfig:
         self.publish_mode = str(self.publish_mode or "direct").strip().lower() or "direct"
         if self.publish_mode not in {"direct", "validated"}:
             self.publish_mode = "direct"
+        self.nacos_publish_mode = _normalize_choice(self.nacos_publish_mode, _NACOS_PUBLISH_MODES, "review")
+        self.skill_reload_mode = _normalize_choice(self.skill_reload_mode, _SKILL_RELOAD_MODES, "poll")
         self.validation_required_results = max(1, int(self.validation_required_results or 1))
         self.validation_required_approvals = max(1, int(self.validation_required_approvals or 1))
         self.validation_min_mean_score = max(
@@ -239,6 +252,10 @@ class EvolveServerConfig:
             nacos_username=os.environ.get("EVOLVE_NACOS_USERNAME", ""),
             nacos_password=os.environ.get("EVOLVE_NACOS_PASSWORD", ""),
             nacos_label=os.environ.get("EVOLVE_NACOS_LABEL", "latest"),
+            nacos_publish_mode=os.environ.get("EVOLVE_NACOS_PUBLISH_MODE", "review"),
+            skill_reload_mode=os.environ.get("EVOLVE_SKILL_RELOAD_MODE", "poll"),
+            proxy_reload_url=os.environ.get("EVOLVE_PROXY_RELOAD_URL", ""),
+            proxy_reload_api_key=os.environ.get("EVOLVE_PROXY_RELOAD_API_KEY", ""),
             interval_seconds=int(os.environ.get("EVOLVE_INTERVAL", "600")),
             http_port=int(os.environ.get("EVOLVE_PORT", "8787")),
             history_path=os.environ.get("EVOLVE_HISTORY_LOG", "evolve_history.jsonl"),
@@ -352,6 +369,10 @@ class EvolveServerConfig:
             nacos_username=str(getattr(config, "sharing_nacos_username", "") or ""),
             nacos_password=str(getattr(config, "sharing_nacos_password", "") or ""),
             nacos_label=str(getattr(config, "sharing_nacos_label", "") or "latest"),
+            nacos_publish_mode=str(getattr(config, "sharing_nacos_publish_mode", "") or "review"),
+            skill_reload_mode=str(getattr(config, "sharing_skill_reload_mode", "") or "poll"),
+            proxy_reload_url=str(getattr(config, "evolve_proxy_reload_url", "") or ""),
+            proxy_reload_api_key=str(getattr(config, "proxy_api_key", "") or ""),
             openclaw_bin=os.environ.get("AGENT_EVOLVE_OPENCLAW_BIN", "openclaw"),
             openclaw_home=os.environ.get("AGENT_EVOLVE_OPENCLAW_HOME", ""),
             fresh=os.environ.get("AGENT_EVOLVE_FRESH", "1").lower() not in {"0", "false", "no"},

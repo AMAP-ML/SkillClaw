@@ -99,12 +99,22 @@ class SkillClawConfig:
     sharing_nacos_username: str = ""
     sharing_nacos_password: str = ""
     sharing_nacos_label: str = "latest"
+    sharing_nacos_publish_mode: str = "review"
 
     sharing_group_id: str = "default"
     sharing_user_alias: str = ""
     sharing_auto_pull_on_start: bool = False
     sharing_push_min_injections: int = 5
     sharing_push_min_effectiveness: float = 0.3
+    sharing_session_upload_interval: int = 0
+    sharing_skill_reload_mode: str = "poll"
+    sharing_skill_reload_interval_seconds: int = 30
+
+    # ------------------------------------------------------------------ #
+    # Evolve server integration                                           #
+    # ------------------------------------------------------------------ #
+    evolve_server_url: str = ""
+    evolve_proxy_reload_url: str = ""
 
     # ------------------------------------------------------------------ #
     # Background validation                                               #

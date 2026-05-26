@@ -66,6 +66,8 @@ def _build_config_from_args(args: argparse.Namespace) -> EvolveServerConfig:
         config.http_port = args.port
     if args.publish_mode:
         config.publish_mode = args.publish_mode
+    if args.nacos_publish_mode:
+        config.nacos_publish_mode = args.nacos_publish_mode
     if args.use_skill_verifier is not None:
         config.use_skill_verifier = args.use_skill_verifier
     if args.skill_verifier_min_score is not None:
@@ -114,6 +116,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["direct", "validated"],
         default=None,
         help="Direct publish to skills/ or stage jobs for client-side validation before publish.",
+    )
+    parser.add_argument(
+        "--nacos-publish-mode",
+        choices=["draft", "review", "direct"],
+        default=None,
+        help="Nacos Skill lifecycle mode: draft only, submit for review, or publish latest directly.",
     )
     skill_verifier_group = parser.add_mutually_exclusive_group()
     skill_verifier_group.add_argument(

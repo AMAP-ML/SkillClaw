@@ -23,6 +23,9 @@ _DEFAULT_LLM_API_MODE_BY_CLAW = {
     "codex": "responses",
 }
 _FALLBACK_LLM_API_MODE = "chat"
+_NACOS_PUBLISH_MODES = {"draft", "review", "direct"}
+_SKILL_RELOAD_MODES = {"off", "poll", "callback"}
+_MIN_SKILL_RELOAD_INTERVAL_SECONDS = 5
 
 _DEFAULTS: dict = {
     "llm": {
@@ -77,11 +80,19 @@ _DEFAULTS: dict = {
         "nacos_username": "",
         "nacos_password": "",
         "nacos_label": "latest",
+        "nacos_publish_mode": "review",
         "group_id": "default",
         "user_alias": "",
         "auto_pull_on_start": False,
         "push_min_injections": 5,
         "push_min_effectiveness": 0.3,
+        "session_upload_interval": 0,
+        "skill_reload_mode": "poll",
+        "skill_reload_interval_seconds": 30,
+    },
+    "evolve": {
+        "server_url": "",
+        "proxy_reload_url": "",
     },
     "validation": {
         "enabled": False,
@@ -157,6 +168,26 @@ def _infer_sharing_backend(sharing: dict[str, Any]) -> str:
 def _normalize_validation_mode(value: Any) -> str:
     del value
     return "replay"
+
+
+def _normalize_choice(value: Any, allowed: set[str], default: str) -> str:
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in allowed else default
+
+
+def _normalize_non_negative_int(value: Any, default: int = 0) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_reload_interval(value: Any) -> int:
+    try:
+        interval = int(value or 30)
+    except (TypeError, ValueError):
+        interval = 30
+    return max(_MIN_SKILL_RELOAD_INTERVAL_SECONDS, interval)
 
 
 def default_skills_dir_for_claw(claw_type: str) -> Path:
@@ -284,6 +315,7 @@ class ConfigStore:
             raw_claw_type = "none"
 
         sharing = data.get("sharing", {})
+        evolve = data.get("evolve", {})
         validation = data.get("validation", {})
         dashboard = data.get("dashboard", {})
         sharing_backend = _infer_sharing_backend(sharing)
@@ -372,11 +404,30 @@ class ConfigStore:
             sharing_nacos_username=str(sharing.get("nacos_username", "") or sharing.get("username", "") or ""),
             sharing_nacos_password=str(sharing.get("nacos_password", "") or sharing.get("password", "") or ""),
             sharing_nacos_label=str(sharing.get("nacos_label", "") or sharing.get("label", "") or "latest"),
+            sharing_nacos_publish_mode=_normalize_choice(
+                sharing.get("nacos_publish_mode", "review"),
+                _NACOS_PUBLISH_MODES,
+                "review",
+            ),
             sharing_group_id=str(sharing.get("group_id", "default") or "default"),
             sharing_user_alias=str(sharing.get("user_alias", "") or ""),
             sharing_auto_pull_on_start=bool(sharing.get("auto_pull_on_start", False)),
             sharing_push_min_injections=int(sharing.get("push_min_injections", 5)),
             sharing_push_min_effectiveness=float(sharing.get("push_min_effectiveness", 0.3)),
+            sharing_session_upload_interval=_normalize_non_negative_int(
+                sharing.get("session_upload_interval", 0),
+                default=0,
+            ),
+            sharing_skill_reload_mode=_normalize_choice(
+                sharing.get("skill_reload_mode", "poll"),
+                _SKILL_RELOAD_MODES,
+                "poll",
+            ),
+            sharing_skill_reload_interval_seconds=_normalize_reload_interval(
+                sharing.get("skill_reload_interval_seconds", 30),
+            ),
+            evolve_server_url=str(evolve.get("server_url", "") or ""),
+            evolve_proxy_reload_url=str(evolve.get("proxy_reload_url", "") or ""),
             validation_enabled=bool(validation.get("enabled", False)),
             validation_mode=_normalize_validation_mode(validation.get("mode", "replay")),
             validation_idle_after_seconds=int(validation.get("idle_after_seconds", 300)),
@@ -400,6 +451,7 @@ class ConfigStore:
         llm = data.get("llm", {})
         skills = data.get("skills", {})
         prm = data.get("prm", {})
+        evolve = data.get("evolve", {})
         dashboard = data.get("dashboard", {})
         claw_type = str(data.get("claw_type", "openclaw") or "openclaw")
         effective_skills_dir = resolve_skills_dir(
@@ -458,6 +510,8 @@ class ConfigStore:
                     "sharing.nacos_namespace: "
                     f"{sharing.get('nacos_namespace_id') or sharing.get('namespace_id', 'public')}",
                     f"sharing.nacos_label: {sharing.get('nacos_label') or sharing.get('label', 'latest')}",
+                    "sharing.nacos_publish_mode: "
+                    f"{_normalize_choice(sharing.get('nacos_publish_mode', 'review'), _NACOS_PUBLISH_MODES, 'review')}",
                     "sharing.nacos_lifecycle: upload -> submit; review/publish policy is controlled by Nacos",
                     "sharing.session_backend: "
                     f"{sharing.get('session_backend') or ('local' if sharing.get('local_root') else 'not configured')}",
@@ -466,10 +520,18 @@ class ConfigStore:
                 f"sharing.group:   {sharing.get('group_id', 'default')}",
                 f"sharing.alias:   {sharing.get('user_alias', '?')}",
                 f"sharing.auto_pull: {sharing.get('auto_pull_on_start', False)}",
+                "sharing.session_upload_interval: "
+                f"{_normalize_non_negative_int(sharing.get('session_upload_interval', 0), default=0)}",
+                "sharing.skill_reload_mode: "
+                f"{_normalize_choice(sharing.get('skill_reload_mode', 'poll'), _SKILL_RELOAD_MODES, 'poll')}",
+                "sharing.skill_reload_interval: "
+                f"{_normalize_reload_interval(sharing.get('skill_reload_interval_seconds', 30))}",
             ]
         else:
             lines.append("sharing.enabled: False")
         lines += [
+            f"evolve.server_url: {evolve.get('server_url', '') or '(not set)'}",
+            f"evolve.proxy_reload_url: {evolve.get('proxy_reload_url', '') or '(not set)'}",
             f"validation.enabled: {validation.get('enabled', False)}",
             f"validation.mode: {_normalize_validation_mode(validation.get('mode', 'replay'))}",
             f"validation.idle_after: {validation.get('idle_after_seconds', 300)}",

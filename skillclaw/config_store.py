@@ -364,14 +364,10 @@ class ConfigStore:
             sharing_session_backend=sharing_session_backend,
             sharing_nacos_server=nacos_server,
             sharing_nacos_namespace_id=str(
-                sharing.get("nacos_namespace_id", "")
-                or sharing.get("namespace_id", "")
-                or "public"
+                sharing.get("nacos_namespace_id", "") or sharing.get("namespace_id", "") or "public"
             ),
             sharing_nacos_access_token=str(
-                sharing.get("nacos_access_token", "")
-                or sharing.get("access_token", "")
-                or ""
+                sharing.get("nacos_access_token", "") or sharing.get("access_token", "") or ""
             ),
             sharing_nacos_username=str(sharing.get("nacos_username", "") or sharing.get("username", "") or ""),
             sharing_nacos_password=str(sharing.get("nacos_password", "") or sharing.get("password", "") or ""),

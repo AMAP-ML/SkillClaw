@@ -748,7 +748,7 @@ def inspect_codex_config(cfg: "SkillClawConfig") -> dict[str, object]:
         next_steps.append("Start SkillClaw once with `claw_type=codex` so it can register ~/.codex/config.toml.")
     if configured_provider == "skillclaw":
         issues.append("Codex global model_provider still points at SkillClaw; normal Codex runs may be intercepted.")
-        next_steps.append("Remove top-level `model_provider = \"skillclaw\"` or run `skillclaw restore codex`.")
+        next_steps.append('Remove top-level `model_provider = "skillclaw"` or run `skillclaw restore codex`.')
     if not expected_skills_dir.is_dir():
         issues.append(f"Codex skills directory is missing: {expected_skills_dir}")
         next_steps.append(f"Create or prepare the Codex skills directory: {expected_skills_dir}")
@@ -942,9 +942,7 @@ def _latest_opencode_backup_path() -> Path | None:
 
 
 def _prepare_opencode_skills_dir(cfg: "SkillClawConfig") -> None:
-    target_dir = Path(
-        str(getattr(cfg, "skills_dir", "") or _OPENCODE_SKILLS_DIR)
-    ).expanduser()
+    target_dir = Path(str(getattr(cfg, "skills_dir", "") or _OPENCODE_SKILLS_DIR)).expanduser()
     _prepare_external_skills_dir(target_dir, "OpenCode")
 
 
@@ -995,9 +993,7 @@ def inspect_opencode_config(cfg: "SkillClawConfig") -> dict[str, object]:
     config_path = _OPENCODE_CONFIG_PATH
     expected_model = cfg.served_model_name or cfg.llm_model_id or "skillclaw-model"
     expected_base_url = f"http://127.0.0.1:{cfg.proxy_port}/v1"
-    expected_skills_dir = Path(
-        str(getattr(cfg, "skills_dir", "") or _OPENCODE_SKILLS_DIR)
-    ).expanduser()
+    expected_skills_dir = Path(str(getattr(cfg, "skills_dir", "") or _OPENCODE_SKILLS_DIR)).expanduser()
 
     data = _load_json_mapping(config_path, "OpenCode")
     provider_block = data.get("provider") if isinstance(data, dict) else {}
@@ -1026,8 +1022,7 @@ def inspect_opencode_config(cfg: "SkillClawConfig") -> dict[str, object]:
     uses_default_skills_dir = expected_skills_dir == _OPENCODE_SKILLS_DIR
     issues: list[str] = []
     notes: list[str] = [
-        "OpenCode uses SkillClaw through a custom provider block in"
-        " ~/.config/opencode/opencode.json.",
+        "OpenCode uses SkillClaw through a custom provider block in ~/.config/opencode/opencode.json.",
         "OpenCode session capture falls back to proxy-side heuristics"
         " because OpenCode does not send explicit SkillClaw session headers.",
     ]

@@ -373,9 +373,7 @@ class DashboardService:
             else:
                 document = str(version_payload.get("skill_md") or version_payload.get("content") or "").strip()
                 if self._requires_full_bundle(current_bundle_record):
-                    raise ValueError(
-                        "selected version only has a SKILL.md snapshot; full bundle replay is unavailable"
-                    )
+                    raise ValueError("selected version only has a SKILL.md snapshot; full bundle replay is unavailable")
                 self._write_document_version(skill_root, document)
             label = f"共享 v{version_num}"
         else:

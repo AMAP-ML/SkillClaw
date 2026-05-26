@@ -237,18 +237,10 @@ def _nacos_zip_to_bundle(zip_bytes: bytes) -> dict[str, bytes]:
 
 
 def _largest_nacos_version(versions: list[str]) -> str | None:
-    semver_versions = [
-        (parsed, version)
-        for version in versions
-        if (parsed := _parse_semver(version)) is not None
-    ]
+    semver_versions = [(parsed, version) for version in versions if (parsed := _parse_semver(version)) is not None]
     if semver_versions:
         return max(semver_versions, key=lambda item: item[0])[1]
-    v_versions = [
-        (parsed, version)
-        for version in versions
-        if (parsed := _parse_v_version(version)) is not None
-    ]
+    v_versions = [(parsed, version) for version in versions if (parsed := _parse_v_version(version)) is not None]
     if v_versions:
         return max(v_versions, key=lambda item: item[0])[1]
     return max(versions) if versions else None
@@ -379,13 +371,15 @@ class NacosSkillHub:
         out: list[dict[str, Any]] = []
         for item in self._client.list_skills():
             labels = item.get("labels") if isinstance(item.get("labels"), dict) else {}
-            out.append({
-                **item,
-                "version": labels.get(self._label) or item.get("version") or item.get("reviewingVersion") or "",
-                "uploaded_by": item.get("owner") or item.get("from") or "nacos",
-                "uploaded_at": item.get("updatedAt") or item.get("updateTime") or "",
-                "category": item.get("category") or "general",
-            })
+            out.append(
+                {
+                    **item,
+                    "version": labels.get(self._label) or item.get("version") or item.get("reviewingVersion") or "",
+                    "uploaded_by": item.get("owner") or item.get("from") or "nacos",
+                    "uploaded_at": item.get("updatedAt") or item.get("updateTime") or "",
+                    "category": item.get("category") or "general",
+                }
+            )
         return out
 
     def push_skills(

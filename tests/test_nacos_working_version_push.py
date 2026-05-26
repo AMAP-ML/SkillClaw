@@ -98,9 +98,7 @@ def test_push_skips_when_reviewing_version_matches_local_bundle(tmp_path: Path) 
     assert result["skipped"] == 1
     assert result["uploaded"] == 0
     assert client.uploads == []
-    assert client.download_calls == [
-        {"name": "demo-skill", "version": "0.0.1", "label": "latest", "admin": True}
-    ]
+    assert client.download_calls == [{"name": "demo-skill", "version": "0.0.1", "label": "latest", "admin": True}]
 
 
 def test_push_fails_when_reviewing_version_has_different_content(tmp_path: Path) -> None:
@@ -135,9 +133,7 @@ def test_push_fails_when_reviewed_version_has_different_content(tmp_path: Path) 
     with pytest.raises(RuntimeError, match="already has reviewing version 0.0.3"):
         NacosSkillHub(client=client).push_skills(str(skills_dir))
 
-    assert client.download_calls == [
-        {"name": "demo-skill", "version": "0.0.3", "label": "latest", "admin": True}
-    ]
+    assert client.download_calls == [{"name": "demo-skill", "version": "0.0.3", "label": "latest", "admin": True}]
     assert client.uploads == []
     assert client.submits == []
 
@@ -201,9 +197,7 @@ def test_evolve_upload_skips_existing_reviewed_version_with_different_content() 
     )
 
     assert status == "skipped_existing_reviewing"
-    assert client.download_calls == [
-        {"name": "demo-skill", "version": "0.0.3", "label": "latest", "admin": True}
-    ]
+    assert client.download_calls == [{"name": "demo-skill", "version": "0.0.3", "label": "latest", "admin": True}]
     assert client.uploads == []
     assert client.submits == []
 
@@ -257,9 +251,7 @@ def test_evolve_fetch_downloads_nacos_published_label_version() -> None:
     content = server._fetch_skill("demo-skill")
 
     assert content == SKILL_MD
-    assert client.download_calls == [
-        {"name": "demo-skill", "version": "0.0.3", "label": "latest", "admin": False}
-    ]
+    assert client.download_calls == [{"name": "demo-skill", "version": "0.0.3", "label": "latest", "admin": False}]
 
 
 def test_evolve_fetch_downloads_reviewed_version_as_reviewing_working_version() -> None:
@@ -286,9 +278,7 @@ def test_evolve_fetch_downloads_reviewed_version_as_reviewing_working_version() 
     content = server._fetch_skill("demo-skill")
 
     assert content == SKILL_MD
-    assert client.download_calls == [
-        {"name": "demo-skill", "version": "0.0.3", "label": "latest", "admin": True}
-    ]
+    assert client.download_calls == [{"name": "demo-skill", "version": "0.0.3", "label": "latest", "admin": True}]
 
 
 def test_evolve_fetch_downloads_largest_published_version_when_latest_label_missing() -> None:
@@ -315,6 +305,4 @@ def test_evolve_fetch_downloads_largest_published_version_when_latest_label_miss
     content = server._fetch_skill("demo-skill")
 
     assert content == SKILL_MD
-    assert client.download_calls == [
-        {"name": "demo-skill", "version": "0.0.4", "label": "latest", "admin": False}
-    ]
+    assert client.download_calls == [{"name": "demo-skill", "version": "0.0.4", "label": "latest", "admin": False}]

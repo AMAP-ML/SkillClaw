@@ -104,11 +104,13 @@ def test_skill_hub_push_pull_roundtrips_single_file_skill(tmp_path: Path) -> Non
     rec = manifest["solo-skill"]
     assert rec["format"] == "bundle_v1"
     assert rec["entrypoint"] == "SKILL.md"
-    assert rec["files"] == [{
-        "path": "SKILL.md",
-        "sha256": rec["sha256"],
-        "size": len(solo_md.encode("utf-8")),
-    }]
+    assert rec["files"] == [
+        {
+            "path": "SKILL.md",
+            "sha256": rec["sha256"],
+            "size": len(solo_md.encode("utf-8")),
+        }
+    ]
 
     restored_dir = tmp_path / "restored-skills"
     pull_result = hub.pull_skills(str(restored_dir))
@@ -225,11 +227,13 @@ def test_skill_hub_roundtrips_extra_unstructured_files_and_attributes_them(tmp_p
 
     read_skills = _extract_read_skills_from_tool_calls(read_calls, skill_path_map)
 
-    assert read_skills == [{
-        "skill_id": manager.get_all_skills()[0]["id"],
-        "skill_name": "extra-skill",
-        "path": extra_path,
-    }]
+    assert read_skills == [
+        {
+            "skill_id": manager.get_all_skills()[0]["id"],
+            "skill_name": "extra-skill",
+            "path": extra_path,
+        }
+    ]
 
 
 def test_agent_workspace_detects_nested_bundle_changes(tmp_path: Path) -> None:
@@ -248,9 +252,7 @@ def test_agent_workspace_detects_nested_bundle_changes(tmp_path: Path) -> None:
     )
 
     before = workspace.snapshot_skills()
-    (workspace.skills_dir / "demo-skill" / "references" / "guide.md").write_text(
-        "second\n", encoding="utf-8"
-    )
+    (workspace.skills_dir / "demo-skill" / "references" / "guide.md").write_text("second\n", encoding="utf-8")
 
     changes = workspace.collect_changes(before)
 
@@ -302,17 +304,21 @@ def test_skill_path_map_and_tool_attribution_include_bundle_files(tmp_path: Path
     read_skills = _extract_read_skills_from_tool_calls(read_calls, skill_path_map)
     modified_skills = _extract_modified_skills_from_tool_calls(write_calls, skill_path_map)
 
-    assert read_skills == [{
-        "skill_id": manager.get_all_skills()[0]["id"],
-        "skill_name": "demo-skill",
-        "path": reference_path,
-    }]
-    assert modified_skills == [{
-        "skill_id": manager.get_all_skills()[0]["id"],
-        "skill_name": "demo-skill",
-        "path": script_path,
-        "action": "edit_file",
-    }]
+    assert read_skills == [
+        {
+            "skill_id": manager.get_all_skills()[0]["id"],
+            "skill_name": "demo-skill",
+            "path": reference_path,
+        }
+    ]
+    assert modified_skills == [
+        {
+            "skill_id": manager.get_all_skills()[0]["id"],
+            "skill_name": "demo-skill",
+            "path": script_path,
+            "action": "edit_file",
+        }
+    ]
 
 
 def test_hermes_skill_tool_attribution_uses_bundle_child_paths(tmp_path: Path) -> None:
@@ -364,17 +370,21 @@ def test_hermes_skill_tool_attribution_uses_bundle_child_paths(tmp_path: Path) -
     read_skills = _extract_read_skills_from_tool_calls(read_calls, skill_path_map)
     modified_skills = _extract_modified_skills_from_tool_calls(write_calls, skill_path_map)
 
-    assert read_skills == [{
-        "skill_id": skill_id,
-        "skill_name": "demo-skill",
-        "path": reference_path,
-    }]
-    assert modified_skills == [{
-        "skill_id": skill_id,
-        "skill_name": "demo-skill",
-        "path": script_path,
-        "action": "skill_manage",
-    }]
+    assert read_skills == [
+        {
+            "skill_id": skill_id,
+            "skill_name": "demo-skill",
+            "path": reference_path,
+        }
+    ]
+    assert modified_skills == [
+        {
+            "skill_id": skill_id,
+            "skill_name": "demo-skill",
+            "path": script_path,
+            "action": "skill_manage",
+        }
+    ]
 
 
 def test_claude_code_skill_tool_detected(tmp_path: Path) -> None:
@@ -389,9 +399,7 @@ def test_claude_code_skill_tool_detected(tmp_path: Path) -> None:
     manager = SkillManager(str(skills_dir))
     skill_path_map = manager.get_skill_path_map()
     skill_id = manager.get_all_skills()[0]["id"]
-    evolve_paths = [
-        p for p, info in skill_path_map.items() if info.get("skill_name") == "evolve-demo"
-    ]
+    evolve_paths = [p for p, info in skill_path_map.items() if info.get("skill_name") == "evolve-demo"]
 
     skill_calls = [
         {
@@ -404,8 +412,10 @@ def test_claude_code_skill_tool_detected(tmp_path: Path) -> None:
 
     read_skills = _extract_read_skills_from_tool_calls(skill_calls, skill_path_map)
 
-    assert read_skills == [{
-        "skill_id": skill_id,
-        "skill_name": "evolve-demo",
-        "path": evolve_paths[0],
-    }]
+    assert read_skills == [
+        {
+            "skill_id": skill_id,
+            "skill_name": "evolve-demo",
+            "path": evolve_paths[0],
+        }
+    ]

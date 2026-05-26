@@ -7,15 +7,11 @@ def test_anthropic_tool_result_blocks_convert_to_openai_tool_messages():
         "messages": [
             {
                 "role": "assistant",
-                "content": [
-                    {"type": "tool_use", "id": "toolu_1", "name": "Skill", "input": {"name": "debug"}}
-                ],
+                "content": [{"type": "tool_use", "id": "toolu_1", "name": "Skill", "input": {"name": "debug"}}],
             },
             {
                 "role": "user",
-                "content": [
-                    {"type": "tool_result", "tool_use_id": "toolu_1", "content": "Skill instructions"}
-                ],
+                "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "Skill instructions"}],
             },
         ],
     }
@@ -130,9 +126,7 @@ def test_openai_tool_calls_convert_to_anthropic_tool_use_blocks():
     converted = anthropic_messages.from_openai_response(openai_resp, "claude-code-test")
 
     assert converted["stop_reason"] == "tool_use"
-    assert converted["content"] == [
-        {"type": "tool_use", "id": "call_1", "name": "Skill", "input": {"name": "debug"}}
-    ]
+    assert converted["content"] == [{"type": "tool_use", "id": "call_1", "name": "Skill", "input": {"name": "debug"}}]
 
 
 def test_openai_read_tool_call_normalizes_to_claude_code_schema():
@@ -405,6 +399,7 @@ async def _collect_stream_events(result, model):
 def test_streaming_openai_tool_calls_emit_anthropic_tool_use_events():
     import asyncio
     import json
+
     result = {
         "response": {
             "id": "chatcmpl_1",
@@ -487,10 +482,10 @@ def test_streaming_read_tool_call_emits_sanitized_claude_code_arguments():
     )
 
 
-
 def test_streaming_openai_tool_calls_use_tool_use_stop_reason_even_if_finish_reason_is_stop():
     import asyncio
     import json
+
     result = {
         "response": {
             "id": "chatcmpl_1",
@@ -518,10 +513,10 @@ def test_streaming_openai_tool_calls_use_tool_use_stop_reason_even_if_finish_rea
     parsed = [(name, json.loads(data)) for name, data in events]
 
     assert any(
-        name == "message_delta"
-        and payload["delta"] == {"stop_reason": "tool_use", "stop_sequence": None}
+        name == "message_delta" and payload["delta"] == {"stop_reason": "tool_use", "stop_sequence": None}
         for name, payload in parsed
     )
+
 
 def test_anthropic_system_blocks_preserve_text_and_cache_control():
     body = {
@@ -604,7 +599,6 @@ def test_openai_response_with_tool_calls_uses_tool_use_stop_reason_even_if_finis
     assert converted["stop_reason"] == "tool_use"
 
 
-
 def test_anthropic_server_web_search_tool_is_not_converted_to_function_tool():
     body = {
         "model": "claude-code-test",
@@ -627,6 +621,7 @@ def test_anthropic_server_web_search_tool_is_not_converted_to_function_tool():
             },
         }
     ]
+
 
 def test_anthropic_multimodal_image_input_converts_to_openai_chat_content_parts():
     body = {

@@ -92,7 +92,6 @@ def _normalize_assistant_content_parts(content: list[dict]) -> tuple[str, list[d
     return (" ".join(text_parts).strip(), tool_calls)
 
 
-
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 _TOOL_HANDLE_RE = re.compile(r"^call_(?:kimi|xml)_\d+$")
 _KIMI_TOOL_CALL_RE = re.compile(
@@ -253,21 +252,12 @@ def _looks_like_path(value: str) -> bool:
     text = str(value or "").strip()
     if not text or text in {".", ".."}:
         return False
-    return (
-        "/" in text
-        or "\\" in text
-        or text.startswith("~")
-        or text.endswith("SKILL.md")
-    )
+    return "/" in text or "\\" in text or text.startswith("~") or text.endswith("SKILL.md")
 
 
 def _extract_skill_paths_from_patch(raw_text: str) -> list[str]:
     return _deduplicate_paths(
-        [
-            match.group(1).strip()
-            for match in _PATCH_PATH_RE.finditer(str(raw_text or ""))
-            if match.group(1).strip()
-        ]
+        [match.group(1).strip() for match in _PATCH_PATH_RE.finditer(str(raw_text or "")) if match.group(1).strip()]
     )
 
 
@@ -1127,7 +1117,7 @@ def _image_dimensions_from_bytes(data: bytes) -> tuple[int, int] | None:
                 continue
             if index + 2 > len(data):
                 return None
-            segment_length = struct.unpack(">H", data[index:index + 2])[0]
+            segment_length = struct.unpack(">H", data[index : index + 2])[0]
             if segment_length < 2 or index + segment_length > len(data):
                 return None
             if marker in {
@@ -1146,7 +1136,7 @@ def _image_dimensions_from_bytes(data: bytes) -> tuple[int, int] | None:
                 0xCF,
             }:
                 if segment_length >= 7:
-                    height, width = struct.unpack(">HH", data[index + 3:index + 7])
+                    height, width = struct.unpack(">HH", data[index + 3 : index + 7])
                     return (width, height) if width > 0 and height > 0 else None
                 return None
             index += segment_length
@@ -3004,7 +2994,6 @@ class SkillClawAPIServer:
         """Yield Anthropic-format SSE events from an internal result dict."""
         async for chunk in anthropic_protocol.stream_from_openai_result(result, model, tool_names):
             yield chunk
-
 
     # ------------------------------------------------------------------ #
     # Lifecycle                                                            #

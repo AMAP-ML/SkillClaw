@@ -184,11 +184,7 @@ class SkillHub:
         return self._bucket.iter_objects(prefix=prefix)
 
     def _delete_remote_bundle_extras(self, skill_name: str, keep_paths: Collection[str]) -> None:
-        keep_keys = {
-            self._skill_bundle_key(skill_name, rel_path)
-            for rel_path in keep_paths
-            if rel_path != "SKILL.md"
-        }
+        keep_keys = {self._skill_bundle_key(skill_name, rel_path) for rel_path in keep_paths if rel_path != "SKILL.md"}
         for obj in self._iter_remote_keys(self._skill_files_prefix(skill_name)):
             key = str(getattr(obj, "key", "") or "")
             if key and key not in keep_keys:

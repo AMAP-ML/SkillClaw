@@ -35,6 +35,7 @@ def _process_alive_unix(pid: int) -> bool:
 
 def _process_alive_windows(pid: int) -> bool:
     import ctypes
+
     kernel32 = ctypes.windll.kernel32
     PROCESS_QUERY_INFORMATION = 0x0400
     handle = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, False, pid)

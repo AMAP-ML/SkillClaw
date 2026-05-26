@@ -133,7 +133,7 @@ async def test_forward_to_llm_responses_stream_preserves_upstream_sse(monkeypatc
         async def aiter_raw(self):
             yield b'data: {"type":"response.created"}\n\n'
             yield b'data: {"type":"response.completed"}\n\n'
-            yield b'data: [DONE]\n\n'
+            yield b"data: [DONE]\n\n"
 
     class FakeStreamContext:
         async def __aenter__(self):
@@ -182,7 +182,7 @@ async def test_forward_to_llm_responses_stream_preserves_upstream_sse(monkeypatc
     assert chunks == [
         b'data: {"type":"response.created"}\n\n',
         b'data: {"type":"response.completed"}\n\n',
-        b'data: [DONE]\n\n',
+        b"data: [DONE]\n\n",
     ]
     assert captured["method"] == "POST"
     assert captured["url"] == "http://upstream.test/v1/responses"
@@ -205,7 +205,7 @@ async def test_responses_endpoint_passthroughs_native_stream():
 
     async def fake_stream(body):
         yield b'data: {"type":"response.created","upstream":true}\n\n'
-        yield b'data: [DONE]\n\n'
+        yield b"data: [DONE]\n\n"
 
     server._stream_llm_responses = fake_stream
     client = httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test")
@@ -241,9 +241,7 @@ async def test_responses_chat_bridge_merges_previous_response_history(tmp_path):
             "response": {
                 "id": f"chatcmpl_{idx}",
                 "created": 0,
-                "choices": [
-                    {"message": {"role": "assistant", "content": f"ok {idx}"}, "finish_reason": "stop"}
-                ],
+                "choices": [{"message": {"role": "assistant", "content": f"ok {idx}"}, "finish_reason": "stop"}],
                 "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
             }
         }
@@ -297,9 +295,7 @@ async def test_responses_continuation_keeps_new_instructions_first(tmp_path):
             "response": {
                 "id": f"chatcmpl_{idx}",
                 "created": 0,
-                "choices": [
-                    {"message": {"role": "assistant", "content": f"ok {idx}"}, "finish_reason": "stop"}
-                ],
+                "choices": [{"message": {"role": "assistant", "content": f"ok {idx}"}, "finish_reason": "stop"}],
                 "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
             }
         }
@@ -379,9 +375,7 @@ async def test_responses_continuation_deduplicates_replayed_output_items(tmp_pat
             "response": {
                 "id": f"chatcmpl_{idx}",
                 "created": 0,
-                "choices": [
-                    {"message": {"role": "assistant", "content": f"ok {idx}"}, "finish_reason": "stop"}
-                ],
+                "choices": [{"message": {"role": "assistant", "content": f"ok {idx}"}, "finish_reason": "stop"}],
                 "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
             }
         }

@@ -958,9 +958,7 @@ class EvolveServer(EvolveEngineMixin):
         @app.get("/status")
         async def status():
             entries = (
-                self._load_remote_skills()
-                if self._uses_nacos_skill_registry()
-                else self._id_registry.all_entries()
+                self._load_remote_skills() if self._uses_nacos_skill_registry() else self._id_registry.all_entries()
             )
             pending_keys = await self._call_storage(list_session_keys, self._bucket, self._prefix)
             return JSONResponse(

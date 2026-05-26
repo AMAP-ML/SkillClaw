@@ -879,8 +879,7 @@ def skills_publish(name, version, no_update_latest):
         raise click.ClickException("skills publish is only available when sharing.skill_backend is nacos.")
     result = hub.publish_skill(name, version, update_latest_label=not no_update_latest)
     click.echo(
-        f"Published {result['skill_name']} {result['version']} "
-        f"(updated latest: {result['updated_latest_label']})."
+        f"Published {result['skill_name']} {result['version']} (updated latest: {result['updated_latest_label']})."
     )
 
 

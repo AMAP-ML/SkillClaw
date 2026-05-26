@@ -90,11 +90,13 @@ def bundle_file_records(bundle_files: Mapping[str, bytes | bytearray | str]) -> 
     records: list[dict[str, int | str]] = []
     for rel_path, raw_data in sorted(coerce_skill_bundle(bundle_files).items()):
         data = _coerce_bytes(raw_data)
-        records.append({
-            "path": rel_path,
-            "sha256": hashlib.sha256(data).hexdigest(),
-            "size": len(data),
-        })
+        records.append(
+            {
+                "path": rel_path,
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "size": len(data),
+            }
+        )
     return records
 
 

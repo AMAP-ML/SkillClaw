@@ -1593,14 +1593,34 @@ class SkillClawAPIServer:
 
             body = await request.json()
             if owner._responses_native_enabled():
+                record_body = copy.deepcopy(body)
                 turn_type = _resolve_turn_type(x_turn_type, body.get("turn_type"), default="main")
-                body = owner._prepare_native_responses_body(body, turn_type=turn_type)
+                injected_skills = owner._prepare_native_responses_body_inplace(body, turn_type=turn_type)
+                _raw_sid = x_session_id or codex_session_id or body.get("session_id") or ""
+                session_id = _raw_sid or await owner._resolve_tui_session(
+                    body.get("model", owner._served_model),
+                    len(body.get("input", []) if isinstance(body.get("input"), list) else []),
+                )
+                session_done = _resolve_session_done(x_session_done, body.get("session_done"))
                 if bool(body.get("stream", False)):
                     return StreamingResponse(
-                        owner._stream_llm_responses(body),
+                        owner._stream_and_track_responses(
+                            body,
+                            record_body=record_body,
+                            session_id=session_id,
+                            turn_type=turn_type,
+                            injected_skills=injected_skills,
+                            session_done=session_done,
+                        ),
                         media_type="text/event-stream",
                     )
                 response_payload = await owner._forward_to_llm_responses(body)
+                owner._record_responses_turn(
+                    session_id, record_body, response_payload,
+                    turn_type=turn_type,
+                    injected_skills=injected_skills,
+                    session_done=session_done,
+                )
                 return JSONResponse(content=response_payload)
 
             previous_response_id = str(body.get("previous_response_id") or "").strip()
@@ -2517,8 +2537,13 @@ class SkillClawAPIServer:
     def _prepare_native_responses_body(self, body: dict[str, Any], *, turn_type: str) -> dict[str, Any]:
         """Apply non-destructive SkillClaw hooks before native Responses forwarding."""
         prepared = dict(body)
+        self._prepare_native_responses_body_inplace(prepared, turn_type=turn_type)
+        return prepared
+
+    def _prepare_native_responses_body_inplace(self, body: dict[str, Any], *, turn_type: str) -> list[str]:
+        """Inject skills into a Responses body in-place. Returns injected skill names."""
         if not self.skill_manager or turn_type != "main":
-            return prepared
+            return []
 
         try:
             self.skill_manager.refresh_if_changed()
@@ -2529,7 +2554,7 @@ class SkillClawAPIServer:
             max_chars=getattr(self.config, "max_skills_prompt_chars", 30_000),
         )
         if not skill_text:
-            return prepared
+            return []
 
         all_skills = self.skill_manager.get_all_skills()
         skill_names = [s.get("name", "unknown_skill") for s in all_skills if isinstance(s, dict)]
@@ -2540,9 +2565,60 @@ class SkillClawAPIServer:
         )
         self.skill_manager.record_injection(skill_names)
 
-        existing = _normalize_responses_content(prepared.get("instructions", ""))
-        prepared["instructions"] = (existing + "\n\n" + skill_text).strip() if existing else skill_text
-        return prepared
+        existing = _normalize_responses_content(body.get("instructions", ""))
+        body["instructions"] = (existing + "\n\n" + skill_text).strip() if existing else skill_text
+        return skill_names
+
+    def _record_responses_turn(
+        self,
+        session_id: str,
+        request_body: dict[str, Any],
+        response_payload: dict[str, Any],
+        *,
+        turn_type: str,
+        injected_skills: list[str],
+        session_done: bool,
+    ) -> None:
+        """Record a Responses API turn into the session tracking system."""
+        if not session_id:
+            return
+        self._touch_session(session_id)
+        prompt_text = _normalize_responses_content(request_body.get("instructions", ""))
+        inp = request_body.get("input")
+        if isinstance(inp, str):
+            prompt_text = (prompt_text + "\n" + inp).strip() if prompt_text else inp
+        elif isinstance(inp, list):
+            user_parts = []
+            for item in inp:
+                if isinstance(item, dict) and item.get("role") == "user":
+                    user_parts.append(_normalize_responses_content(item.get("content", "")))
+            if user_parts:
+                joined = " ".join(user_parts)
+                prompt_text = (prompt_text + "\n" + joined).strip() if prompt_text else joined
+        response_text = ""
+        for item in response_payload.get("output", []):
+            if isinstance(item, dict) and item.get("type") == "message":
+                for part in item.get("content", []):
+                    if isinstance(part, dict) and part.get("type") == "output_text":
+                        response_text += part.get("text", "")
+        turns = self._session_turns.setdefault(session_id, [])
+        turn_num = len(turns) + 1
+        turns.append({
+            "turn_num": turn_num,
+            "prompt_text": prompt_text[:2000],
+            "response_text": response_text[:2000],
+            "injected_skills": injected_skills,
+            "prm_score": None,
+        })
+        logger.info(
+            "[Codex] %s session=%s turn=%d prompt=%d chars response=%d chars skills=%s",
+            turn_type, session_id, turn_num,
+            len(prompt_text), len(response_text),
+            ",".join(injected_skills) if injected_skills else "(none)",
+        )
+        self._maybe_upload_session_snapshot(session_id, turn_num)
+        if session_done:
+            self._safe_create_task(self._close_session(session_id, reason="codex_session_done"))
 
     async def _forward_to_llm_responses(self, body: dict[str, Any]) -> dict[str, Any]:
         """Forward a Codex Responses payload to an upstream Responses API."""
@@ -2591,6 +2667,52 @@ class SkillClawAPIServer:
                     continue
                 logger.error("[OpenClaw] Responses forward failed: %s", e, exc_info=True)
                 raise HTTPException(status_code=502, detail=f"Responses forward error: {e}") from e
+
+    async def _stream_and_track_responses(
+        self,
+        body: dict[str, Any],
+        *,
+        record_body: dict[str, Any] | None = None,
+        session_id: str,
+        turn_type: str,
+        injected_skills: list[str],
+        session_done: bool,
+    ):
+        """Wrap _stream_llm_responses: passthrough SSE + extract response.completed for tracking."""
+        completed_payload: dict[str, Any] | None = None
+        buf = ""
+        async for chunk in self._stream_llm_responses(body):
+            yield chunk
+            if completed_payload is None:
+                try:
+                    text = chunk.decode("utf-8", errors="ignore") if isinstance(chunk, bytes) else chunk
+                    buf += text
+                except Exception:
+                    pass
+        if buf and session_id:
+            for line in buf.split("\n"):
+                stripped = line.strip()
+                if not stripped.startswith("data: "):
+                    continue
+                raw = stripped[6:]
+                if raw == "[DONE]":
+                    continue
+                try:
+                    data = json.loads(raw)
+                    if isinstance(data, dict) and data.get("type") == "response.completed":
+                        completed_payload = data.get("response", data)
+                        break
+                except Exception:
+                    continue
+        if completed_payload and session_id:
+            self._record_responses_turn(
+                session_id, record_body or body, completed_payload,
+                turn_type=turn_type,
+                injected_skills=injected_skills,
+                session_done=session_done,
+            )
+        elif session_id:
+            logger.warning("[Codex] stream ended without response.completed event")
 
     async def _stream_llm_responses(self, body: dict[str, Any]):
         """Passthrough upstream Responses SSE without aggregating or rewriting events."""

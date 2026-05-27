@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import pytest
 import httpx
+import pytest
 
 from skillclaw.api_server import SkillClawAPIServer
 from skillclaw.config import SkillClawConfig

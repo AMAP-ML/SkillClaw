@@ -2595,12 +2595,19 @@ class SkillClawAPIServer:
             if user_parts:
                 joined = " ".join(user_parts)
                 prompt_text = (prompt_text + "\n" + joined).strip() if prompt_text else joined
-        response_text = ""
+        response_parts = []
         for item in response_payload.get("output", []):
-            if isinstance(item, dict) and item.get("type") == "message":
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == "message":
                 for part in item.get("content", []):
                     if isinstance(part, dict) and part.get("type") == "output_text":
-                        response_text += part.get("text", "")
+                        response_parts.append(part.get("text", ""))
+            elif item.get("type") == "function_call":
+                name = item.get("name", "")
+                args = str(item.get("arguments", ""))[:500]
+                response_parts.append(f"[tool:{name}] {args}")
+        response_text = "\n".join(response_parts)
         turns = self._session_turns.setdefault(session_id, [])
         turn_num = len(turns) + 1
         turns.append({
@@ -2678,41 +2685,105 @@ class SkillClawAPIServer:
         injected_skills: list[str],
         session_done: bool,
     ):
-        """Wrap _stream_llm_responses: passthrough SSE + extract response.completed for tracking."""
-        completed_payload: dict[str, Any] | None = None
+        """Wrap _stream_llm_responses: passthrough SSE + parse response.completed inline."""
+        tracked = False
         buf = ""
+        output_items: dict[int, dict[str, Any]] = {}
+        output_text_parts: dict[tuple[int, int], str] = {}
+
+        def ensure_message_item(output_index: int) -> dict[str, Any]:
+            item = output_items.setdefault(
+                output_index,
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [],
+                },
+            )
+            content = item.setdefault("content", [])
+            if not isinstance(content, list):
+                item["content"] = []
+            return item
+
+        def apply_output_text(output_index: int, content_index: int, text: str) -> None:
+            item = ensure_message_item(output_index)
+            content = item.setdefault("content", [])
+            while len(content) <= content_index:
+                content.append({"type": "output_text", "text": "", "annotations": []})
+            part = content[content_index]
+            if isinstance(part, dict):
+                part["type"] = part.get("type") or "output_text"
+                part["text"] = text
+                part.setdefault("annotations", [])
+
+        def parse_responses_stream_event(data: dict[str, Any]) -> dict[str, Any] | None:
+            event_type = data.get("type")
+            output_index = int(data.get("output_index", 0) or 0)
+            content_index = int(data.get("content_index", 0) or 0)
+
+            if event_type == "response.output_item.added":
+                item = data.get("item")
+                if isinstance(item, dict):
+                    output_items[output_index] = item
+            elif event_type == "response.output_item.done":
+                item = data.get("item")
+                if isinstance(item, dict):
+                    output_items[output_index] = item
+            elif event_type == "response.output_text.delta":
+                key = (output_index, content_index)
+                output_text_parts[key] = output_text_parts.get(key, "") + str(data.get("delta") or "")
+                apply_output_text(output_index, content_index, output_text_parts[key])
+            elif event_type == "response.output_text.done":
+                text = str(data.get("text") or output_text_parts.get((output_index, content_index), ""))
+                output_text_parts[(output_index, content_index)] = text
+                apply_output_text(output_index, content_index, text)
+            elif event_type == "response.content_part.done":
+                part = data.get("part")
+                if isinstance(part, dict) and part.get("type") == "output_text":
+                    text = str(part.get("text") or output_text_parts.get((output_index, content_index), ""))
+                    output_text_parts[(output_index, content_index)] = text
+                    apply_output_text(output_index, content_index, text)
+            elif event_type == "response.completed":
+                response_payload = data.get("response") if isinstance(data.get("response"), dict) else dict(data)
+                if output_items and not response_payload.get("output"):
+                    response_payload = {
+                        **response_payload,
+                        "output": [item for _, item in sorted(output_items.items())],
+                    }
+                return response_payload
+            return None
+
         async for chunk in self._stream_llm_responses(body):
-            yield chunk
-            if completed_payload is None:
+            if not tracked:
                 try:
                     text = chunk.decode("utf-8", errors="ignore") if isinstance(chunk, bytes) else chunk
                     buf += text
+                    while "\n" in buf:
+                        line, buf = buf.split("\n", 1)
+                        stripped = line.strip()
+                        if not stripped.startswith("data: "):
+                            continue
+                        raw = stripped[6:]
+                        if raw == "[DONE]":
+                            continue
+                        try:
+                            data = json.loads(raw)
+                        except Exception:
+                            continue
+                        response_payload = parse_responses_stream_event(data) if isinstance(data, dict) else None
+                        if response_payload is not None:
+                            self._record_responses_turn(
+                                session_id, record_body or body, response_payload,
+                                turn_type=turn_type,
+                                injected_skills=injected_skills,
+                                session_done=session_done,
+                            )
+                            tracked = True
+                            break
                 except Exception:
                     pass
-        if buf and session_id:
-            for line in buf.split("\n"):
-                stripped = line.strip()
-                if not stripped.startswith("data: "):
-                    continue
-                raw = stripped[6:]
-                if raw == "[DONE]":
-                    continue
-                try:
-                    data = json.loads(raw)
-                    if isinstance(data, dict) and data.get("type") == "response.completed":
-                        completed_payload = data.get("response", data)
-                        break
-                except Exception:
-                    continue
-        if completed_payload and session_id:
-            self._record_responses_turn(
-                session_id, record_body or body, completed_payload,
-                turn_type=turn_type,
-                injected_skills=injected_skills,
-                session_done=session_done,
-            )
-        elif session_id:
-            logger.warning("[Codex] stream ended without response.completed event")
+            yield chunk
 
     async def _stream_llm_responses(self, body: dict[str, Any]):
         """Passthrough upstream Responses SSE without aggregating or rewriting events."""
@@ -2723,7 +2794,7 @@ class SkillClawAPIServer:
             async with httpx.AsyncClient(timeout=_llm_request_timeout_seconds()) as client:
                 async with client.stream("POST", url, json=send_body, headers=headers) as resp:
                     resp.raise_for_status()
-                    async for chunk in resp.aiter_raw():
+                    async for chunk in resp.aiter_bytes():
                         if chunk:
                             yield chunk
         except httpx.HTTPStatusError as e:

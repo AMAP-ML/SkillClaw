@@ -1,3 +1,6 @@
+import gzip
+import json
+
 import httpx
 import pytest
 
@@ -123,6 +126,76 @@ async def test_responses_endpoint_uses_native_forward_when_enabled():
 
 
 @pytest.mark.asyncio
+async def test_native_responses_records_original_prompt_before_skill_injection():
+    class FakeSkillManager:
+        def refresh_if_changed(self):
+            return None
+
+        def build_injection_prompt(self, *, max_chars):
+            return "<available_skills>\n" + ("catalog filler " * 300) + "\n</available_skills>"
+
+        def get_all_skills(self):
+            return [{"name": "demo-skill"}]
+
+        def record_injection(self, names):
+            self.names = names
+
+    server = SkillClawAPIServer(
+        SkillClawConfig(
+            llm_api_mode="responses",
+            llm_api_base="http://upstream.test/v1",
+            llm_model_id="upstream-model",
+            proxy_api_key="skillclaw",
+            record_enabled=False,
+        ),
+        skill_manager=FakeSkillManager(),
+    )
+    seen = {}
+
+    async def fake_forward(body):
+        seen["instructions"] = body.get("instructions", "")
+        return {
+            "id": "resp_native",
+            "object": "response",
+            "created_at": 0,
+            "status": "completed",
+            "model": "upstream-model",
+            "output": [
+                {
+                    "id": "msg_1",
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [{"type": "output_text", "text": "native ok", "annotations": []}],
+                }
+            ],
+        }
+
+    server._forward_to_llm_responses = fake_forward
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test")
+    try:
+        response = await client.post(
+            "/v1/responses",
+            headers={"Authorization": "Bearer skillclaw", "Session_id": "codex-session-1"},
+            json={
+                "model": "skillclaw-model",
+                "instructions": "original instructions",
+                "input": "actual user task",
+                "stream": False,
+            },
+        )
+    finally:
+        await client.aclose()
+
+    assert response.status_code == 200
+    assert "<available_skills>" in seen["instructions"]
+    turn = server._session_turns["codex-session-1"][0]
+    assert turn["prompt_text"] == "original instructions\nactual user task"
+    assert "<available_skills>" not in turn["prompt_text"]
+    assert turn["injected_skills"] == ["demo-skill"]
+
+
+@pytest.mark.asyncio
 async def test_forward_to_llm_responses_stream_preserves_upstream_sse(monkeypatch):
     captured = {}
 
@@ -130,7 +203,7 @@ async def test_forward_to_llm_responses_stream_preserves_upstream_sse(monkeypatc
         def raise_for_status(self):
             return None
 
-        async def aiter_raw(self):
+        async def aiter_bytes(self):
             yield b'data: {"type":"response.created"}\n\n'
             yield b'data: {"type":"response.completed"}\n\n'
             yield b"data: [DONE]\n\n"
@@ -189,6 +262,206 @@ async def test_forward_to_llm_responses_stream_preserves_upstream_sse(monkeypatc
     assert captured["json"]["stream"] is True
     assert captured["json"]["model"] == "upstream-model"
     assert captured["json"]["tools"] == body["tools"]
+
+
+@pytest.mark.asyncio
+async def test_forward_to_llm_responses_stream_decodes_compressed_upstream_sse(monkeypatch):
+    raw_sse = (
+        b'data: {"type":"response.created"}\n\n'
+        b'data: {"type":"response.completed"}\n\n'
+        b"data: [DONE]\n\n"
+    )
+
+    class FakeStreamResponse:
+        def raise_for_status(self):
+            return None
+
+        def aiter_bytes(self):
+            response = httpx.Response(
+                200,
+                headers={"content-encoding": "gzip"},
+                stream=httpx.ByteStream(gzip.compress(raw_sse)),
+            )
+            return response.aiter_bytes()
+
+    class FakeStreamContext:
+        async def __aenter__(self):
+            return FakeStreamResponse()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, method, url, json, headers):
+            return FakeStreamContext()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    server = object.__new__(SkillClawAPIServer)
+    server.config = SkillClawConfig(
+        llm_api_base="http://upstream.test/v1",
+        llm_api_key="upstream-key",
+        llm_model_id="upstream-model",
+        llm_api_mode="responses",
+    )
+
+    chunks = []
+    async for chunk in server._stream_llm_responses({"model": "skillclaw-model", "input": "hi", "stream": True}):
+        chunks.append(chunk)
+
+    assert b"".join(chunks) == raw_sse
+
+
+@pytest.mark.asyncio
+async def test_stream_and_track_responses_records_before_completed_chunk_is_consumed():
+    server = object.__new__(SkillClawAPIServer)
+    server._session_turns = {}
+    server._safe_create_task = lambda coro: None
+    recorded = {}
+
+    completed_event = {
+        "type": "response.completed",
+        "response": {
+            "id": "resp_native",
+            "object": "response",
+            "status": "completed",
+            "output": [
+                {
+                    "id": "msg_1",
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [{"type": "output_text", "text": "tracked ok", "annotations": []}],
+                }
+            ],
+        },
+    }
+
+    async def fake_stream(_body):
+        payload = ("data: " + json.dumps(completed_event) + "\n\n").encode()
+        yield payload[:20]
+        yield payload[20:]
+        yield b"data: [DONE]\n\n"
+
+    def fake_record(session_id, request_body, response_payload, *, turn_type, injected_skills, session_done):
+        recorded["session_id"] = session_id
+        recorded["request_body"] = request_body
+        recorded["response_text"] = response_payload["output"][0]["content"][0]["text"]
+        recorded["turn_type"] = turn_type
+        recorded["injected_skills"] = injected_skills
+        recorded["session_done"] = session_done
+
+    server._stream_llm_responses = fake_stream
+    server._record_responses_turn = fake_record
+
+    stream = server._stream_and_track_responses(
+        {"model": "skillclaw-model", "instructions": "<available_skills>catalog</available_skills>", "stream": True},
+        record_body={"model": "skillclaw-model", "instructions": "original instructions", "stream": True},
+        session_id="codex-session-1",
+        turn_type="main",
+        injected_skills=["demo"],
+        session_done=False,
+    )
+    first = await stream.__anext__()
+    second = await stream.__anext__()
+    assert first + second == ("data: " + json.dumps(completed_event) + "\n\n").encode()
+    assert recorded == {
+        "session_id": "codex-session-1",
+        "request_body": {"model": "skillclaw-model", "instructions": "original instructions", "stream": True},
+        "response_text": "tracked ok",
+        "turn_type": "main",
+        "injected_skills": ["demo"],
+        "session_done": False,
+    }
+    await stream.aclose()
+
+
+@pytest.mark.asyncio
+async def test_stream_and_track_responses_records_output_from_stream_events_when_completed_lacks_output():
+    server = object.__new__(SkillClawAPIServer)
+    recorded = {}
+
+    events = [
+        {
+            "type": "response.output_item.added",
+            "output_index": 0,
+            "item": {
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "status": "in_progress",
+                "content": [],
+            },
+        },
+        {
+            "type": "response.output_text.delta",
+            "output_index": 0,
+            "content_index": 0,
+            "item_id": "msg_1",
+            "delta": "real ",
+        },
+        {
+            "type": "response.output_text.delta",
+            "output_index": 0,
+            "content_index": 0,
+            "item_id": "msg_1",
+            "delta": "ok",
+        },
+        {
+            "type": "response.output_text.done",
+            "output_index": 0,
+            "content_index": 0,
+            "item_id": "msg_1",
+            "text": "real ok",
+        },
+        {
+            "type": "response.completed",
+            "response": {
+                "id": "resp_1",
+                "object": "response",
+                "status": "completed",
+                "model": "gpt-5.5",
+            },
+        },
+    ]
+
+    async def fake_stream(_body):
+        for event in events:
+            yield ("event: " + event["type"] + "\n").encode()
+            yield ("data: " + json.dumps(event) + "\n\n").encode()
+
+    def fake_record(session_id, request_body, response_payload, *, turn_type, injected_skills, session_done):
+        recorded["session_id"] = session_id
+        recorded["response_text"] = response_payload["output"][0]["content"][0]["text"]
+        recorded["turn_type"] = turn_type
+
+    server._stream_llm_responses = fake_stream
+    server._record_responses_turn = fake_record
+
+    chunks = []
+    async for chunk in server._stream_and_track_responses(
+        {"model": "skillclaw-model", "input": "hi", "stream": True},
+        session_id="codex-session-1",
+        turn_type="main",
+        injected_skills=[],
+        session_done=False,
+    ):
+        chunks.append(chunk)
+
+    assert b"".join(chunks).startswith(b"event: response.output_item.added\n")
+    assert recorded == {
+        "session_id": "codex-session-1",
+        "response_text": "real ok",
+        "turn_type": "main",
+    }
 
 
 @pytest.mark.asyncio

@@ -754,7 +754,9 @@ def inspect_codex_config(cfg: "SkillClawConfig") -> dict[str, object]:
         issues.append("Codex SkillClaw profile config is missing: ~/.codex/skillclaw.config.toml")
     if not proxy_match:
         issues.append("Codex SkillClaw profile is missing or not pointing at the local SkillClaw proxy.")
-        next_steps.append("Start SkillClaw once with `claw_type=codex` so it can register ~/.codex/skillclaw.config.toml.")
+        next_steps.append(
+            "Start SkillClaw once with `claw_type=codex` so it can register ~/.codex/skillclaw.config.toml."
+        )
     if configured_provider == "skillclaw":
         issues.append("Codex global model_provider still points at SkillClaw; normal Codex runs may be intercepted.")
         next_steps.append('Remove top-level `model_provider = "skillclaw"` or run `skillclaw restore codex`.')

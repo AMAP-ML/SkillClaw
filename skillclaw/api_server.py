@@ -1653,7 +1653,9 @@ class SkillClawAPIServer:
                     )
                 response_payload = await owner._forward_to_llm_responses(body)
                 owner._record_responses_turn(
-                    session_id, record_body, response_payload,
+                    session_id,
+                    record_body,
+                    response_payload,
                     turn_type=turn_type,
                     injected_skills=injected_skills,
                     session_done=session_done,
@@ -2672,8 +2674,12 @@ class SkillClawAPIServer:
             self._maybe_upload_session_snapshot(session_id, user_turn_num)
         logger.info(
             "[Codex] %s session=%s turn=%d user_turn=%s prompt=%d chars response=%d chars skills=%s",
-            turn_type, session_id, turn_num, turn_record.get("user_turn_num", "-"),
-            len(prompt_text), len(response_text),
+            turn_type,
+            session_id,
+            turn_num,
+            turn_record.get("user_turn_num", "-"),
+            len(prompt_text),
+            len(response_text),
             ",".join(injected_skills) if injected_skills else "(none)",
         )
         if session_done:
@@ -2826,7 +2832,9 @@ class SkillClawAPIServer:
                         response_payload = parse_responses_stream_event(data) if isinstance(data, dict) else None
                         if response_payload is not None:
                             self._record_responses_turn(
-                                session_id, record_body or body, response_payload,
+                                session_id,
+                                record_body or body,
+                                response_payload,
                                 turn_type=turn_type,
                                 injected_skills=injected_skills,
                                 session_done=session_done,

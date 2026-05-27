@@ -314,11 +314,7 @@ async def test_forward_to_llm_responses_stream_preserves_upstream_sse(monkeypatc
 
 @pytest.mark.asyncio
 async def test_forward_to_llm_responses_stream_decodes_compressed_upstream_sse(monkeypatch):
-    raw_sse = (
-        b'data: {"type":"response.created"}\n\n'
-        b'data: {"type":"response.completed"}\n\n'
-        b"data: [DONE]\n\n"
-    )
+    raw_sse = b'data: {"type":"response.created"}\n\ndata: {"type":"response.completed"}\n\ndata: [DONE]\n\n'
 
     class FakeStreamResponse:
         def raise_for_status(self):

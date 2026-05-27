@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from skillclaw.api_server import (
     _PROTOCOL_ANTHROPIC_MESSAGES,
+    SkillClawAPIServer,
     _classify_raw_turn_kind,
     _is_user_turn_boundary,
-    SkillClawAPIServer,
 )
 from skillclaw.config import SkillClawConfig
 
@@ -121,21 +122,25 @@ def test_user_turn_cadence_counts_visible_turns_not_raw_turns() -> None:
 
 
 def test_claude_internal_turns_do_not_advance_user_turn_boundary() -> None:
-    assert _classify_raw_turn_kind(
-        _PROTOCOL_ANTHROPIC_MESSAGES,
-        '{"title":"Weekly report"}',
-        [],
-    ) == "session_title"
-    assert _classify_raw_turn_kind(
-        _PROTOCOL_ANTHROPIC_MESSAGES,
-        "",
-        [{"id": "call_1", "type": "function", "function": {"name": "Read", "arguments": "{}"}}],
-    ) == "tool_use"
+    assert (
+        _classify_raw_turn_kind(
+            _PROTOCOL_ANTHROPIC_MESSAGES,
+            '{"title":"Weekly report"}',
+            [],
+        )
+        == "session_title"
+    )
+    assert (
+        _classify_raw_turn_kind(
+            _PROTOCOL_ANTHROPIC_MESSAGES,
+            "",
+            [{"id": "call_1", "type": "function", "function": {"name": "Read", "arguments": "{}"}}],
+        )
+        == "tool_use"
+    )
     assert not _is_user_turn_boundary("session_title")
     assert not _is_user_turn_boundary("tool_use")
-    assert _is_user_turn_boundary(
-        _classify_raw_turn_kind(_PROTOCOL_ANTHROPIC_MESSAGES, "final answer", [])
-    )
+    assert _is_user_turn_boundary(_classify_raw_turn_kind(_PROTOCOL_ANTHROPIC_MESSAGES, "final answer", []))
 
 
 def test_openclaw_and_hermes_main_turns_use_user_turn_upload_cadence() -> None:

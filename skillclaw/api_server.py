@@ -3114,9 +3114,13 @@ class SkillClawAPIServer:
 
         for attempt in range(3):
             try:
-                async with httpx.AsyncClient(timeout=5.0) as client:
-                    await client.post(f"{url}/trigger")
+                async with httpx.AsyncClient(timeout=300.0) as client:
+                    resp = await client.post(f"{url}/trigger")
+                    resp.raise_for_status()
+                    result = resp.json()
                 logger.info("[SkillHub] triggered evolve server: %s", url)
+                if isinstance(result, dict) and int(result.get("uploaded_skills") or 0) > 0:
+                    await self._pull_skills_from_cloud()
                 return
             except Exception as e:
                 if attempt < 2:

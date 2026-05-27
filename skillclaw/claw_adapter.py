@@ -45,6 +45,7 @@ _HERMES_SKILLS_DIR = _HERMES_HOME / "skills"
 _HERMES_BACKUP_DIR = Path.home() / ".skillclaw" / "backups" / "hermes"
 _CODEX_HOME = Path.home() / ".codex"
 _CODEX_CONFIG_PATH = _CODEX_HOME / "config.toml"
+_CODEX_PROFILE_CONFIG_PATH = _CODEX_HOME / "skillclaw.config.toml"
 _CODEX_SKILLS_DIR = _CODEX_HOME / "skills"
 _CODEX_BACKUP_DIR = Path.home() / ".skillclaw" / "backups" / "codex"
 _CLAUDE_HOME = Path.home() / ".claude"
@@ -656,7 +657,6 @@ def _build_codex_provider_block(base_url: str, api_key: str) -> str:
 
 def _build_codex_profile_block(model_id: str) -> str:
     lines = [
-        "[profiles.skillclaw]",
         f"model = {_format_toml_value(model_id)}",
         'model_provider = "skillclaw"',
     ]
@@ -673,6 +673,7 @@ def _configure_codex(cfg: "SkillClawConfig") -> None:
     api_key = cfg.proxy_api_key or "skillclaw"
     base_url = f"http://127.0.0.1:{cfg.proxy_port}/v1"
     config_path = _CODEX_CONFIG_PATH
+    profile_config_path = _CODEX_PROFILE_CONFIG_PATH
     _prepare_external_skills_dir(_CODEX_SKILLS_DIR, "Codex")
 
     existing_text = ""
@@ -687,16 +688,17 @@ def _configure_codex(cfg: "SkillClawConfig") -> None:
         updated = _remove_top_level_toml_keys(updated, {"model", "model_provider"})
     updated = _remove_toml_table(updated, "model_providers.skillclaw").rstrip() + "\n\n"
     updated = _remove_toml_table(updated, "profiles.skillclaw").rstrip() + "\n\n"
-    updated += _build_codex_provider_block(base_url, api_key)
-    updated += "\n" + _build_codex_profile_block(model_id)
+    profile_text = _build_codex_profile_block(model_id) + "\n" + _build_codex_provider_block(base_url, api_key)
 
     _backup_codex_config_if_changed(config_path, updated)
     _write_text_atomic(config_path, updated, "Codex config")
+    _write_text_atomic(profile_config_path, profile_text, "Codex SkillClaw profile config")
 
 
 def inspect_codex_config(cfg: "SkillClawConfig") -> dict[str, object]:
     """Return a diagnostic snapshot of the local Codex integration state."""
     config_path = _CODEX_CONFIG_PATH
+    profile_config_path = _CODEX_PROFILE_CONFIG_PATH
     expected_model = cfg.served_model_name or cfg.llm_model_id or "skillclaw-model"
     expected_base_url = f"http://127.0.0.1:{cfg.proxy_port}/v1"
     expected_api_key = cfg.proxy_api_key or "skillclaw"
@@ -711,16 +713,21 @@ def inspect_codex_config(cfg: "SkillClawConfig") -> dict[str, object]:
             text = config_path.read_text(encoding="utf-8")
         except Exception as e:
             logger.warning("[ClawAdapter] Failed to read Codex config %s: %s", config_path, e)
+    profile_text = ""
+    if profile_config_path.exists():
+        try:
+            profile_text = profile_config_path.read_text(encoding="utf-8")
+        except Exception as e:
+            logger.warning("[ClawAdapter] Failed to read Codex profile config %s: %s", profile_config_path, e)
 
     configured_model = str(_extract_top_level_toml_value(text, "model") or "")
     configured_provider = str(_extract_top_level_toml_value(text, "model_provider") or "")
-    provider_cfg = _extract_toml_table(text, "model_providers.skillclaw")
+    provider_cfg = _extract_toml_table(profile_text, "model_providers.skillclaw")
     configured_base_url = str(provider_cfg.get("base_url") or "")
     configured_wire_api = str(provider_cfg.get("wire_api") or "")
     configured_token = str(provider_cfg.get("experimental_bearer_token") or "")
-    profile_cfg = _extract_toml_table(text, "profiles.skillclaw")
-    configured_profile_model = str(profile_cfg.get("model") or "")
-    configured_profile_provider = str(profile_cfg.get("model_provider") or "")
+    configured_profile_model = str(_extract_top_level_toml_value(profile_text, "model") or "")
+    configured_profile_provider = str(_extract_top_level_toml_value(profile_text, "model_provider") or "")
 
     proxy_match = (
         configured_profile_model == expected_model
@@ -743,9 +750,11 @@ def inspect_codex_config(cfg: "SkillClawConfig") -> dict[str, object]:
 
     if not config_path.exists():
         issues.append("Codex config is missing: ~/.codex/config.toml")
+    if not profile_config_path.exists():
+        issues.append("Codex SkillClaw profile config is missing: ~/.codex/skillclaw.config.toml")
     if not proxy_match:
         issues.append("Codex SkillClaw profile is missing or not pointing at the local SkillClaw proxy.")
-        next_steps.append("Start SkillClaw once with `claw_type=codex` so it can register ~/.codex/config.toml.")
+        next_steps.append("Start SkillClaw once with `claw_type=codex` so it can register ~/.codex/skillclaw.config.toml.")
     if configured_provider == "skillclaw":
         issues.append("Codex global model_provider still points at SkillClaw; normal Codex runs may be intercepted.")
         next_steps.append('Remove top-level `model_provider = "skillclaw"` or run `skillclaw restore codex`.')
@@ -797,7 +806,12 @@ def restore_codex_config(backup_path: Path | None = None) -> dict[str, str]:
     text = source.read_text(encoding="utf-8")
     target = _CODEX_CONFIG_PATH
     _write_text_atomic(target, text, "Codex config restore")
-    return {"source": str(source), "target": str(target)}
+    profile_target = _CODEX_PROFILE_CONFIG_PATH
+    removed_profile = False
+    if profile_target.exists():
+        profile_target.unlink()
+        removed_profile = True
+    return {"source": str(source), "target": str(target), "removed_profile": str(removed_profile)}
 
 
 # ------------------------------------------------------------------ #

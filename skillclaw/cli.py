@@ -502,6 +502,8 @@ def restore_codex(backup_path: str | None):
         raise click.ClickException(str(exc)) from None
 
     click.echo(f"Restored Codex config: {result['target']} <- {result['source']}")
+    if result.get("removed_profile") == "True":
+        click.echo("Removed Codex SkillClaw profile config: ~/.codex/skillclaw.config.toml")
 
 
 @restore.command(name="claude")

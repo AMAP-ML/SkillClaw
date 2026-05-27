@@ -193,6 +193,54 @@ async def test_native_responses_records_original_prompt_before_skill_injection()
     assert turn["prompt_text"] == "original instructions\nactual user task"
     assert "<available_skills>" not in turn["prompt_text"]
     assert turn["injected_skills"] == ["demo-skill"]
+    assert turn["raw_turn_kind"] == "final"
+    assert turn["user_turn_num"] == 1
+
+
+def test_native_responses_upload_cadence_uses_user_turn_counter() -> None:
+    server = object.__new__(SkillClawAPIServer)
+    server.config = SkillClawConfig(sharing_enabled=True, sharing_session_upload_interval=2)
+    server._session_turns = {}
+    server._user_turn_counts = {}
+    server._session_last_active = {}
+    queued = []
+
+    def fake_create_task(coro):
+        queued.append(coro)
+        return None
+
+    server._safe_create_task = fake_create_task
+
+    response_payload = {
+        "output": [
+            {
+                "type": "message",
+                "content": [{"type": "output_text", "text": "ok"}],
+            }
+        ]
+    }
+    server._record_responses_turn(
+        "codex-session-1",
+        {"input": "first"},
+        response_payload,
+        turn_type="main",
+        injected_skills=[],
+        session_done=False,
+    )
+    server._record_responses_turn(
+        "codex-session-1",
+        {"input": "second"},
+        response_payload,
+        turn_type="main",
+        injected_skills=[],
+        session_done=False,
+    )
+
+    assert [turn["turn_num"] for turn in server._session_turns["codex-session-1"]] == [1, 2]
+    assert [turn["user_turn_num"] for turn in server._session_turns["codex-session-1"]] == [1, 2]
+    assert len(queued) == 1
+
+    queued[0].close()
 
 
 @pytest.mark.asyncio

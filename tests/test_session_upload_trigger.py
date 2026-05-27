@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import pytest
-import httpx
 
-from skillclaw.api_server import SkillClawAPIServer
+from skillclaw.api_server import (
+    _PROTOCOL_ANTHROPIC_MESSAGES,
+    _classify_raw_turn_kind,
+    _is_user_turn_boundary,
+    SkillClawAPIServer,
+)
 from skillclaw.config import SkillClawConfig
 
 
@@ -14,6 +18,7 @@ def _server_for_snapshot_tests() -> SkillClawAPIServer:
         sharing_session_upload_interval=2,
         evolve_server_url="http://evolve.test",
     )
+    server._user_turn_counts = {}
     server._session_turns = {
         "session-a": [
             {"turn_num": 1, "prompt_text": "one"},
@@ -93,6 +98,81 @@ async def test_session_snapshot_triggers_evolve_only_after_successful_upload() -
     await server._upload_session_snapshot_and_trigger("session-a", [{"turn_num": 2}])
 
     assert calls == {"upload": 2, "trigger": 1}
+
+
+def test_user_turn_cadence_counts_visible_turns_not_raw_turns() -> None:
+    server = _server_for_snapshot_tests()
+    queued = []
+
+    def fake_create_task(coro):
+        queued.append(coro)
+        return None
+
+    server._safe_create_task = fake_create_task
+    server._session_turns["session-a"].append({"turn_num": 3, "raw_turn_kind": "tool_use"})
+
+    assert server._advance_user_turn_and_maybe_upload("session-a") == 1
+    assert queued == []
+
+    assert server._advance_user_turn_and_maybe_upload("session-a") == 2
+    assert len(queued) == 1
+
+    queued[0].close()
+
+
+def test_claude_internal_turns_do_not_advance_user_turn_boundary() -> None:
+    assert _classify_raw_turn_kind(
+        _PROTOCOL_ANTHROPIC_MESSAGES,
+        '{"title":"Weekly report"}',
+        [],
+    ) == "session_title"
+    assert _classify_raw_turn_kind(
+        _PROTOCOL_ANTHROPIC_MESSAGES,
+        "",
+        [{"id": "call_1", "type": "function", "function": {"name": "Read", "arguments": "{}"}}],
+    ) == "tool_use"
+    assert not _is_user_turn_boundary("session_title")
+    assert not _is_user_turn_boundary("tool_use")
+    assert _is_user_turn_boundary(
+        _classify_raw_turn_kind(_PROTOCOL_ANTHROPIC_MESSAGES, "final answer", [])
+    )
+
+
+def test_openclaw_and_hermes_main_turns_use_user_turn_upload_cadence() -> None:
+    server = _server_for_snapshot_tests()
+    captured = {}
+
+    class DummyCoro:
+        def close(self):
+            return None
+
+    def fake_create_task(coro):
+        return None
+
+    def fake_upload_snapshot(session_id, turns):
+        captured["session_id"] = session_id
+        captured["turns"] = turns
+        return DummyCoro()
+
+    server._safe_create_task = fake_create_task
+    server._upload_session_snapshot_and_trigger = fake_upload_snapshot
+    server._session_turns["session-a"] = []
+
+    for raw_turn_num in range(1, 4):
+        turn_record = {
+            "turn_num": raw_turn_num,
+            "raw_turn_kind": _classify_raw_turn_kind("", f"answer {raw_turn_num}", []),
+            "prompt_text": f"user {raw_turn_num}",
+        }
+        server._session_turns["session-a"].append(turn_record)
+        user_turn_num = server._next_user_turn_num("session-a")
+        turn_record["user_turn_num"] = user_turn_num
+        server._maybe_upload_session_snapshot("session-a", user_turn_num)
+
+    assert server._user_turn_counts["session-a"] == 3
+    assert captured["session_id"] == "session-a"
+    assert [t["turn_num"] for t in captured["turns"]] == [1, 2]
+    assert [t["user_turn_num"] for t in captured["turns"]] == [1, 2]
 
 
 def test_skill_reload_polling_starts_only_in_poll_mode(monkeypatch) -> None:

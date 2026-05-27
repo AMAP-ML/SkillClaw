@@ -42,7 +42,14 @@ _RED = "\033[31m"
 _CYAN = "\033[36m"
 _RESET = "\033[0m"
 
-_NON_STANDARD_BODY_KEYS = {"session_id", "session_done", "turn_type"}
+_NON_STANDARD_BODY_KEYS = {
+    "session_id",
+    "session_done",
+    "turn_type",
+    "_skillclaw_protocol",
+}
+_PROTOCOL_ANTHROPIC_MESSAGES = "anthropic_messages"
+_PROTOCOL_RESPONSES_COMPAT = "responses_compat"
 
 
 # ------------------------------------------------------------------ #
@@ -203,6 +210,35 @@ def _resolve_session_done(
     if candidate is None:
         return False
     return str(candidate).strip().lower() in _TRUE_STRINGS
+
+
+def _looks_like_session_title_response(content: str) -> bool:
+    """Return True for Claude Code's internal generate_session_title response."""
+    text = str(content or "").strip()
+    if not text or len(text) > 500:
+        return False
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return False
+    if not isinstance(parsed, dict) or set(parsed.keys()) - {"title"}:
+        return False
+    title = parsed.get("title")
+    return isinstance(title, str) and bool(title.strip())
+
+
+def _classify_raw_turn_kind(protocol: str, content: str, tool_calls: list[dict]) -> str:
+    """Classify recorded raw/main turns for user-turn cadence decisions."""
+    if tool_calls:
+        return "tool_use"
+    if protocol == _PROTOCOL_ANTHROPIC_MESSAGES and _looks_like_session_title_response(content):
+        return "session_title"
+    return "final"
+
+
+def _is_user_turn_boundary(raw_turn_kind: str) -> bool:
+    """Only final assistant responses advance the user-visible turn counter."""
+    return raw_turn_kind == "final"
 
 
 def _normalize_tool_name(raw_name: str, args_raw: str) -> str:
@@ -1418,6 +1454,7 @@ class SkillClawAPIServer:
 
         # State machines
         self._turn_counts: dict[str, int] = {}
+        self._user_turn_counts: dict[str, int] = {}
         self._pending_turn_data: dict[str, dict[int, dict]] = {}  # session → {turn → data}
         self._prm_tasks: dict[str, dict[int, asyncio.Task]] = {}  # session → {turn → task}
         self._pending_records: dict[str, dict] = {}  # for record logging
@@ -1626,6 +1663,7 @@ class SkillClawAPIServer:
             previous_response_id = str(body.get("previous_response_id") or "").strip()
             store_response = bool(body.get("store", True))
             openai_body = _responses_to_openai_body(body, owner._served_model)
+            openai_body["_skillclaw_protocol"] = _PROTOCOL_RESPONSES_COMPAT
             if previous_response_id:
                 stored = owner._responses_store.get(previous_response_id)
                 if stored is None:
@@ -1747,6 +1785,7 @@ class SkillClawAPIServer:
             stream = bool(raw_body.get("stream", False))
             tool_names = _anthropic_request_tool_names(raw_body)
             openai_body = _anthropic_to_openai_body(raw_body)
+            openai_body["_skillclaw_protocol"] = _PROTOCOL_ANTHROPIC_MESSAGES
             model = raw_body.get("model") or owner._served_model
 
             incoming_messages = openai_body.get("messages", [])
@@ -2057,6 +2096,7 @@ class SkillClawAPIServer:
                 )
             eff = self._session_scored_turns.pop(session_id, 0)
             self._turn_counts.pop(session_id, None)
+            self._user_turn_counts.pop(session_id, None)
             self._pending_turn_data.pop(session_id, None)
             prm_tasks = self._prm_tasks.pop(session_id, {})
             for task in prm_tasks.values():
@@ -2269,6 +2309,7 @@ class SkillClawAPIServer:
         turn_type: str,
         session_done: bool,
     ) -> dict[str, Any]:
+        protocol = str(body.get("_skillclaw_protocol") or "").strip()
         messages = body.get("messages")
         if not isinstance(messages, list) or not messages:
             raise HTTPException(status_code=400, detail="messages must be a non-empty list")
@@ -2448,32 +2489,38 @@ class SkillClawAPIServer:
             )
             response_text = content or (json.dumps(tool_calls, ensure_ascii=False) if tool_calls else "")
             self._buffer_record(session_id, turn_num, messages, prompt_text, response_text, tool_calls)
-            self._session_turns.setdefault(session_id, []).append(
-                {
-                    "turn_num": turn_num,
-                    "prompt_text": user_instruction,
-                    "response_text": response_text,
-                    "reasoning_content": reasoning or None,
-                    "tool_calls": tool_calls,
-                    "read_skills": read_skills,
-                    "modified_skills": modified_skills,
-                    "tool_results": tool_summaries,
-                    "tool_results_raw": [],
-                    "tool_observations": [],
-                    "tool_errors": [],
-                    "injected_skills": injected_skills,
-                    "prm_score": None,
-                }
-            )
-            self._maybe_upload_session_snapshot(session_id, turn_num)
+            raw_turn_kind = _classify_raw_turn_kind(protocol, content, tool_calls)
+            turn_record = {
+                "turn_num": turn_num,
+                "raw_turn_kind": raw_turn_kind,
+                "prompt_text": user_instruction,
+                "response_text": response_text,
+                "reasoning_content": reasoning or None,
+                "tool_calls": tool_calls,
+                "read_skills": read_skills,
+                "modified_skills": modified_skills,
+                "tool_results": tool_summaries,
+                "tool_results_raw": [],
+                "tool_observations": [],
+                "tool_errors": [],
+                "injected_skills": injected_skills,
+                "prm_score": None,
+            }
+            self._session_turns.setdefault(session_id, []).append(turn_record)
+            if _is_user_turn_boundary(raw_turn_kind):
+                user_turn_num = self._next_user_turn_num(session_id)
+                turn_record["user_turn_num"] = user_turn_num
+                self._maybe_upload_session_snapshot(session_id, user_turn_num)
             self._pending_turn_data.setdefault(session_id, {})[turn_num] = {
                 "prompt_text": prompt_text,
                 "response_text": response_text,
             }
             logger.info(
-                "[OpenClaw] MAIN session=%s turn=%d prompt_est_tokens=%d response_chars=%d",
+                "[OpenClaw] MAIN session=%s turn=%d user_turn=%s kind=%s prompt_est_tokens=%d response_chars=%d",
                 session_id,
                 turn_num,
+                turn_record.get("user_turn_num", "-"),
+                raw_turn_kind,
                 _estimate_openai_body_input_tokens({"messages": messages, "tools": tools}),
                 len(response_text),
             )
@@ -2610,20 +2657,25 @@ class SkillClawAPIServer:
         response_text = "\n".join(response_parts)
         turns = self._session_turns.setdefault(session_id, [])
         turn_num = len(turns) + 1
-        turns.append({
+        turn_record = {
             "turn_num": turn_num,
+            "raw_turn_kind": "final" if turn_type == "main" else "side",
             "prompt_text": prompt_text[:2000],
             "response_text": response_text[:2000],
             "injected_skills": injected_skills,
             "prm_score": None,
-        })
+        }
+        turns.append(turn_record)
+        if turn_type == "main":
+            user_turn_num = self._next_user_turn_num(session_id)
+            turn_record["user_turn_num"] = user_turn_num
+            self._maybe_upload_session_snapshot(session_id, user_turn_num)
         logger.info(
-            "[Codex] %s session=%s turn=%d prompt=%d chars response=%d chars skills=%s",
-            turn_type, session_id, turn_num,
+            "[Codex] %s session=%s turn=%d user_turn=%s prompt=%d chars response=%d chars skills=%s",
+            turn_type, session_id, turn_num, turn_record.get("user_turn_num", "-"),
             len(prompt_text), len(response_text),
             ",".join(injected_skills) if injected_skills else "(none)",
         )
-        self._maybe_upload_session_snapshot(session_id, turn_num)
         if session_done:
             self._safe_create_task(self._close_session(session_id, reason="codex_session_done"))
 
@@ -3028,11 +3080,21 @@ class SkillClawAPIServer:
             logger.warning("[SkillHub] session upload failed: %s", e)
             return False
 
-    def _maybe_upload_session_snapshot(self, session_id: str, turn_num: int) -> None:
+    def _next_user_turn_num(self, session_id: str) -> int:
+        self._user_turn_counts[session_id] = self._user_turn_counts.get(session_id, 0) + 1
+        return self._user_turn_counts[session_id]
+
+    def _advance_user_turn_and_maybe_upload(self, session_id: str) -> int:
+        user_turn_num = self._next_user_turn_num(session_id)
+        self._maybe_upload_session_snapshot(session_id, user_turn_num)
+        return user_turn_num
+
+    def _maybe_upload_session_snapshot(self, session_id: str, user_turn_num: int) -> None:
+        """Queue a session snapshot when the user-visible turn cadence is reached."""
         interval = max(0, int(getattr(self.config, "sharing_session_upload_interval", 0) or 0))
         if not self.config.sharing_enabled or interval <= 0:
             return
-        if turn_num <= 0 or turn_num % interval != 0:
+        if user_turn_num <= 0 or user_turn_num % interval != 0:
             return
         turns = copy.deepcopy(self._session_turns.get(session_id, []))
         if not turns:

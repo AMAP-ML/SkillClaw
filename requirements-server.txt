@@ -1,5 +1,0 @@
-# Central evolve server dependencies
-boto3
-openai
-oss2
-python-dotenv

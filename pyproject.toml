@@ -14,7 +14,6 @@ dependencies = [
     "uvicorn[standard]",
     "httpx",
     "tiktoken",
-    "requests",
 ]
 
 [project.optional-dependencies]

@@ -5,4 +5,3 @@ httpx
 fastapi
 uvicorn[standard]
 tiktoken
-requests

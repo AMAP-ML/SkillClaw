@@ -2004,11 +2004,15 @@ class SkillClawAPIServer:
 
     async def _skill_reload_poll_loop(self) -> None:
         consecutive_failures = 0
+        first_pull = True
         try:
             while True:
-                jitter = random.uniform(0, self._skill_reload_interval_seconds * 0.1)
-                backoff = min(consecutive_failures * 5.0, 60.0)
-                await asyncio.sleep(self._skill_reload_interval_seconds + jitter + backoff)
+                if first_pull:
+                    first_pull = False
+                else:
+                    jitter = random.uniform(0, self._skill_reload_interval_seconds * 0.1)
+                    backoff = min(consecutive_failures * 5.0, 60.0)
+                    await asyncio.sleep(self._skill_reload_interval_seconds + jitter + backoff)
                 try:
                     await self._pull_skills_from_cloud()
                     consecutive_failures = 0

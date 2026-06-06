@@ -7,6 +7,7 @@ Reads/writes ~/.skillclaw/config.yaml and bridges to SkillClawConfig.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,17 @@ _FALLBACK_LLM_API_MODE = "chat"
 _NACOS_PUBLISH_MODES = {"draft", "review", "direct"}
 _SKILL_RELOAD_MODES = {"off", "poll", "callback"}
 _MIN_SKILL_RELOAD_INTERVAL_SECONDS = 5
+
+
+def _resolve_config_file(config_file: Path | None = None) -> Path:
+    if config_file is not None:
+        return Path(config_file).expanduser()
+
+    env_config_file = os.environ.get("SKILLCLAW_CONFIG_FILE", "").strip()
+    if env_config_file:
+        return Path(env_config_file).expanduser()
+
+    return CONFIG_FILE
 
 _DEFAULTS: dict = {
     "llm": {
@@ -250,8 +262,8 @@ def _default_served_model_name(llm_model_id: str) -> str:
 class ConfigStore:
     """Read/write ~/.skillclaw/config.yaml."""
 
-    def __init__(self, config_file: Path = CONFIG_FILE):
-        self.config_file = config_file
+    def __init__(self, config_file: Path | None = None):
+        self.config_file = _resolve_config_file(config_file)
 
     def exists(self) -> bool:
         return self.config_file.exists()
@@ -308,6 +320,7 @@ class ConfigStore:
         llm_api_mode = str(llm.get("api_mode", default_api_mode) or default_api_mode)
         proxy = data.get("proxy", {})
         skills = data.get("skills", {})
+        record = data.get("record", {})
         orouter = data.get("openrouter", {})
         prm = data.get("prm", {})
         configure_openclaw = bool(data.get("configure_openclaw", True))
@@ -362,6 +375,8 @@ class ConfigStore:
             proxy_port=proxy.get("port", 30000),
             proxy_host=proxy.get("host", "0.0.0.0"),
             proxy_api_key=str(proxy.get("api_key", "") or ""),
+            record_enabled=bool(record.get("enabled", True)),
+            record_dir=str(record.get("dir", "records/") or "records/"),
             served_model_name=(
                 _first_non_empty(proxy, "served_model_name") or _default_served_model_name(llm_model_id)
             ),

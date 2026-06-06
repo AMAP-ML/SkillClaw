@@ -1443,7 +1443,6 @@ class SkillClawAPIServer:
 
         self._served_model = config.served_model_name
         self._expected_api_key = config.proxy_api_key
-        os.makedirs(config.record_dir, exist_ok=True)
         # System prompt compression is only used for OpenClaw (whose verbose
         # system prompt benefits from compression).  Non-OpenClaw agents send
         # short/no system prompts, and the compressed OpenClaw text can trigger

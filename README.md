@@ -4,6 +4,15 @@
 
 # ✨ SkillClaw: Let Skills Evolve Collectively with Agentic Evolver ✨
 
+<p align="center">
+  <a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=skillclaw">
+    <img src="assets/atlas-cloud-logo.png" alt="Atlas Cloud" width="140" />
+  </a>
+  <br />
+  <sub><strong>Atlas Cloud</strong> Atlas Cloud provides OpenAI-compatible LLM APIs and async image/video generation APIs for SkillClaw workflows and multimodal agent capabilities.</sub>
+</p>
+
+
 <h3>AI agent skills that evolve from every real interaction — just talk.<br>Across sessions, agents, devices, and users. Experience compounds. Skills keep growing.</h3>
 
 | 🚀 Quick Install | 💬 Just Chat | 🔌 Broad Compatibility | 🧬 Collective Skill Evolution |

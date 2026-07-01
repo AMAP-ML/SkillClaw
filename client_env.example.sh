@@ -13,6 +13,11 @@
 export OPENAI_BASE_URL="https://your-model-gateway.example/v1"
 export OPENAI_API_KEY="your-openai-api-key"
 
+# Atlas Cloud can be used as an OpenAI-compatible upstream:
+# export ATLASCLOUD_API_KEY="your-atlascloud-api-key"
+# export OPENAI_BASE_URL="https://api.atlascloud.ai/v1"
+# export OPENAI_API_KEY="$ATLASCLOUD_API_KEY"
+
 # Convenience values for shared-skill setup discussions or local wrappers.
 export OSS_ENDPOINT="https://oss-cn-hangzhou.aliyuncs.com"
 export OSS_BUCKET="skillclaw-shared-skills"

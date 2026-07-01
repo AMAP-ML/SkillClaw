@@ -208,6 +208,8 @@ skillclaw setup
 
 设置向导会依次提示你选择 provider、模型、本地 skills 目录、PRM 设置、可选的 CLI agent 集成、以及可选的共享存储。
 
+如果你使用 Atlas Cloud 作为上游 OpenAI 兼容 provider，可以选择 `atlascloud`，保留默认 API base `https://api.atlascloud.ai/v1`，并在提示时输入你的 Atlas Cloud API key。该预设默认走 chat-compatible 转发，因此 Codex 客户端也可以通过 SkillClaw 的 Responses-to-chat 桥接使用。
+
 第一次最小化验证时，推荐这样选：
 
 - `CLI agent` 选 `none`，先不要自动改外部 agent 配置

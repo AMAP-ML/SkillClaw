@@ -337,6 +337,7 @@ class ConfigStore:
         prm_url = str(prm.get("url", "") or llm_api_base)
         prm_model = str(prm.get("model", "") or llm_model_id or "gpt-5.2")
         prm_api_key = str(prm.get("api_key", "") or llm_api_key)
+        prm_temperature = float(prm.get("temperature", 0.6) or 0.6)
 
         skills_dir = resolve_skills_dir(
             skills.get("dir", str(_DEFAULT_SKILLS_DIR)),
@@ -377,6 +378,7 @@ class ConfigStore:
             prm_url=prm_url,
             prm_model=prm_model,
             prm_api_key=prm_api_key,
+            prm_temperature=prm_temperature,
             # Model
             model_name=llm.get("model_id") or "Qwen/Qwen3-4B",
             # Claw

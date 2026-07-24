@@ -241,6 +241,8 @@ If you already use Hermes, the client-side path is:
 3. Keep `Proxy model name exposed to agents` as `skillclaw-model` unless you have a specific reason to change it.
 4. Start SkillClaw. On startup, SkillClaw rewrites `~/.hermes/config.yaml` to point Hermes at the local proxy.
 5. Hermes uses `~/.hermes/skills` as the default local skill library. SkillClaw prepares that directory automatically and copies in any missing legacy skills from `~/.skillclaw/skills`.
+
+**Custom Hermes home:** if your Hermes install sets `HERMES_HOME`, SkillClaw follows it automatically — the config rewrite, doctor checks, and skill-dir defaults all resolve against the same home. To point SkillClaw at a specific config (e.g. a profile-scoped install), set `SKILLCLAW_HERMES_HOME` to the directory containing the target `config.yaml`; it wins over `HERMES_HOME`. Resolution order: `SKILLCLAW_HERMES_HOME` → `HERMES_HOME` → `~/.hermes`.
 6. If you want to inspect or undo the integration, use `skillclaw doctor hermes` and `skillclaw restore hermes`.
 
 Minimal verification:

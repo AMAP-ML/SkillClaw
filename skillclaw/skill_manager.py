@@ -332,8 +332,10 @@ class SkillManager:
         return tuple(fingerprint)
 
     def _is_hermes_skill_root(self) -> bool:
+        from ._paths import resolve_hermes_home
+
         return os.path.realpath(self._skills_dir) == os.path.realpath(
-            os.path.join(os.path.expanduser("~"), ".hermes", "skills")
+            str(resolve_hermes_home() / "skills")
         )
 
     def _skill_dir_path(self, skill: dict) -> str:

@@ -66,6 +66,60 @@ logger = logging.getLogger(__name__)
 _SAFE_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,63}$")
 
 # ------------------------------------------------------------------ #
+# Companion files                                                      #
+# ------------------------------------------------------------------ #
+
+# Directories inside a skill folder that carry load-bearing material
+# beyond SKILL.md (reference docs, runnable scripts, assets, examples).
+_COMPANION_DIRS = ("references", "reference", "docs", "assets", "scripts", "examples", "templates")
+
+# Extra markdown docs at the skill root that are part of the skill
+# (setup guides, usage notes) — everything except SKILL.md itself.
+_COMPANION_ROOT_DOCS_RE = re.compile(
+    r"^(setup|changelog|readme|how[_-]?to[_-]?use|guide|usage|notes|architecture)"
+    r"(\.[a-z-]+)?\.md$",
+    re.IGNORECASE,
+)
+
+# Cap per skill so the injected catalog stays bounded for fat skills.
+_MAX_COMPANION_FILES = 12
+
+
+def _find_companion_files(skill_dir: str) -> list[str]:
+    """Return the skill's companion files, as sorted paths relative to skill_dir.
+
+    General across any skill layout: files under the known companion
+    directories plus recognized root-level docs, never SKILL.md itself.
+    Ignored-noise paths (.git, __pycache__, *.pyc, .DS_Store) are skipped
+    with the same rules as skill bundles.
+    """
+    from .skill_bundle import is_ignored_bundle_rel_path
+
+    found: list[str] = []
+    for sub in _COMPANION_DIRS:
+        sub_dir = os.path.join(skill_dir, sub)
+        if not os.path.isdir(sub_dir):
+            continue
+        for dirpath, dirnames, filenames in os.walk(sub_dir):
+            dirnames[:] = sorted(dirnames)
+            for filename in sorted(filenames):
+                full = os.path.join(dirpath, filename)
+                rel = os.path.relpath(full, skill_dir).replace(os.sep, "/")
+                if is_ignored_bundle_rel_path(rel):
+                    continue
+                found.append(rel)
+    try:
+        for entry in sorted(os.listdir(skill_dir)):
+            if entry.upper() == "SKILL.MD":
+                continue
+            if _COMPANION_ROOT_DOCS_RE.match(entry) and os.path.isfile(os.path.join(skill_dir, entry)):
+                found.append(entry)
+    except OSError:
+        return []
+    return sorted(found)[:_MAX_COMPANION_FILES]
+
+
+# ------------------------------------------------------------------ #
 # Frontmatter parser                                                   #
 # ------------------------------------------------------------------ #
 
@@ -174,6 +228,7 @@ class SkillManager:
         public_skill_root: str = "",
         retrieval_mode: str = "template",
         embedding_model_path: Optional[str] = None,
+        include_companion_files: bool = True,
     ):
         if retrieval_mode not in ("template", "embedding"):
             raise ValueError(f"retrieval_mode must be 'template' or 'embedding', got '{retrieval_mode}'")
@@ -184,6 +239,7 @@ class SkillManager:
         self._public_skill_root = public_skill_root.strip()
         self.retrieval_mode = retrieval_mode
         self.embedding_model_path = embedding_model_path or "Qwen/Qwen3-Embedding-0.6B"
+        self.include_companion_files = include_companion_files
 
         self._embedding_model = None
         self._skill_embeddings_cache: Optional[Dict] = None
@@ -304,6 +360,10 @@ class SkillManager:
             skill = _parse_skill_md(path)
             if skill is None:
                 continue
+            if self.include_companion_files:
+                companions = _find_companion_files(os.path.dirname(path))
+                if companions:
+                    skill["companion_files"] = companions
             result["all_skills"].append(skill)
 
         return result
@@ -329,6 +389,23 @@ class SkillManager:
                     int(stat.st_size),
                 )
             )
+            # Companion files are part of the catalog: adding/editing/removing
+            # one must invalidate the cache even when SKILL.md is untouched.
+            if self.include_companion_files:
+                skill_dir = os.path.dirname(path)
+                for rel in _find_companion_files(skill_dir):
+                    full = os.path.join(skill_dir, rel)
+                    try:
+                        cstat = os.stat(full)
+                    except OSError:
+                        continue
+                    fingerprint.append(
+                        (
+                            os.path.realpath(full),
+                            int(cstat.st_mtime_ns),
+                            int(cstat.st_size),
+                        )
+                    )
         return tuple(fingerprint)
 
     def _is_hermes_skill_root(self) -> bool:
@@ -585,6 +662,12 @@ class SkillManager:
             lines.append(
                 f"    <location>{escape(self._public_skill_path(skill) or skill.get('file_path', ''))}</location>"
             )
+            companions = skill.get("companion_files") or []
+            if companions:
+                lines.append("    <companion_files>")
+                for rel in companions:
+                    lines.append(f"      <file>{escape(rel)}</file>")
+                lines.append("    </companion_files>")
             lines.append("  </skill>")
         lines.append("</available_skills>")
         return "\n".join(lines)
@@ -630,6 +713,12 @@ class SkillManager:
         trimmed = skills_prompt.strip()
         if not trimmed:
             return ""
+        companion_lines = []
+        if "<companion_files>" in trimmed:
+            companion_lines = [
+                "- If the chosen skill lists <companion_files>, read those files too before "
+                "acting — they are part of the skill (reference docs, scripts, setup guides).",
+            ]
         return "\n".join(
             [
                 "## Skills (mandatory)",
@@ -639,6 +728,7 @@ class SkillManager:
                 "- If multiple could apply: choose the most specific one, then read/follow it.",
                 "- If none clearly apply: do not read any SKILL.md.",
                 "Constraints: never read more than one skill up front; only read after selecting.",
+                *companion_lines,
                 "- When a skill drives external API writes, assume rate limits: prefer fewer "
                 "larger writes, avoid tight one-item loops, serialize bursts when possible, "
                 "and respect 429/Retry-After.",

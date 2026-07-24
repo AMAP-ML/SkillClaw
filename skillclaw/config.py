@@ -35,6 +35,7 @@ class SkillClawConfig:
     embedding_model_path: str = "Qwen/Qwen3-Embedding-0.6B"
     skill_top_k: int = 6
     max_skills_prompt_chars: int = 30000
+    skills_include_companion_files: bool = True
 
     # ------------------------------------------------------------------ #
     # Context window                                                       #

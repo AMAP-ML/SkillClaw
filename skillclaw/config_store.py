@@ -47,6 +47,7 @@ _DEFAULTS: dict = {
         "dir": str(_DEFAULT_SKILLS_DIR),
         "retrieval_mode": "template",
         "top_k": 6,
+        "companion_files": True,
     },
     "openrouter": {
         "app_name": "SkillClaw",
@@ -370,6 +371,7 @@ class ConfigStore:
             skills_public_root=str(skills.get("public_root", "") or ""),
             retrieval_mode=skills.get("retrieval_mode", "template"),
             skill_top_k=int(skills.get("top_k", 6)),
+            skills_include_companion_files=bool(skills.get("companion_files", True)),
             max_context_tokens=int(data.get("max_context_tokens", 20000) or 20000),
             # PRM
             use_prm=bool(prm.get("enabled", True)),

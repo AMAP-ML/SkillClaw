@@ -547,6 +547,25 @@ def inspect_hermes_config(cfg: "SkillClawConfig") -> dict[str, object]:
             "Run SkillClaw once before relying on `skillclaw restore hermes`, so a backup can be created."
         )
 
+    companion_enabled = True
+    try:
+        from .config_store import ConfigStore
+
+        companion_enabled = bool(ConfigStore().to_skillclaw_config().skills_include_companion_files)
+    except Exception:
+        pass
+    companion_coverage = "(skills dir unavailable)"
+    if expected_skills_dir.is_dir():
+        try:
+            from .skill_manager import SkillManager
+
+            mgr = SkillManager(skills_dir=str(expected_skills_dir), include_companion_files=True)
+            all_skills = mgr.get_all_skills()
+            with_companions = sum(1 for s in all_skills if s.get("companion_files"))
+            companion_coverage = f"{with_companions} of {len(all_skills)} skills have companion files"
+        except Exception as e:
+            companion_coverage = f"(scan failed: {e})"
+
     return {
         "status": "ok" if not issues else "warning",
         "config_path": str(config_path),
@@ -565,6 +584,8 @@ def inspect_hermes_config(cfg: "SkillClawConfig") -> dict[str, object]:
         "legacy_skillclaw_skills_present": legacy_present,
         "latest_backup": str(backup_path) if backup_path else "(none)",
         "session_boundary_mode": "explicit headers if provided, proxy heuristics otherwise",
+        "companion_files_enabled": companion_enabled,
+        "companion_files_coverage": companion_coverage,
         "issues": issues,
         "notes": notes,
         "next_steps": next_steps,

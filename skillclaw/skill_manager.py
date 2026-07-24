@@ -90,16 +90,24 @@ def _find_companion_files(skill_dir: str) -> list[str]:
 
     General across any skill layout: files under the known companion
     directories plus recognized root-level docs, never SKILL.md itself.
+    Ignored-noise paths (.git, __pycache__, *.pyc, .DS_Store) are skipped
+    with the same rules as skill bundles.
     """
+    from .skill_bundle import is_ignored_bundle_rel_path
+
     found: list[str] = []
     for sub in _COMPANION_DIRS:
         sub_dir = os.path.join(skill_dir, sub)
         if not os.path.isdir(sub_dir):
             continue
-        for dirpath, _dirnames, filenames in os.walk(sub_dir):
+        for dirpath, dirnames, filenames in os.walk(sub_dir):
+            dirnames[:] = sorted(dirnames)
             for filename in sorted(filenames):
                 full = os.path.join(dirpath, filename)
-                found.append(os.path.relpath(full, skill_dir).replace(os.sep, "/"))
+                rel = os.path.relpath(full, skill_dir).replace(os.sep, "/")
+                if is_ignored_bundle_rel_path(rel):
+                    continue
+                found.append(rel)
     try:
         for entry in sorted(os.listdir(skill_dir)):
             if entry.upper() == "SKILL.MD":
@@ -381,6 +389,23 @@ class SkillManager:
                     int(stat.st_size),
                 )
             )
+            # Companion files are part of the catalog: adding/editing/removing
+            # one must invalidate the cache even when SKILL.md is untouched.
+            if self.include_companion_files:
+                skill_dir = os.path.dirname(path)
+                for rel in _find_companion_files(skill_dir):
+                    full = os.path.join(skill_dir, rel)
+                    try:
+                        cstat = os.stat(full)
+                    except OSError:
+                        continue
+                    fingerprint.append(
+                        (
+                            os.path.realpath(full),
+                            int(cstat.st_mtime_ns),
+                            int(cstat.st_size),
+                        )
+                    )
         return tuple(fingerprint)
 
     def _is_hermes_skill_root(self) -> bool:
@@ -688,6 +713,12 @@ class SkillManager:
         trimmed = skills_prompt.strip()
         if not trimmed:
             return ""
+        companion_lines = []
+        if "<companion_files>" in trimmed:
+            companion_lines = [
+                "- If the chosen skill lists <companion_files>, read those files too before "
+                "acting — they are part of the skill (reference docs, scripts, setup guides).",
+            ]
         return "\n".join(
             [
                 "## Skills (mandatory)",
@@ -697,8 +728,7 @@ class SkillManager:
                 "- If multiple could apply: choose the most specific one, then read/follow it.",
                 "- If none clearly apply: do not read any SKILL.md.",
                 "Constraints: never read more than one skill up front; only read after selecting.",
-                "- If the chosen skill lists <companion_files>, read those files too before "
-                "acting — they are part of the skill (reference docs, scripts, setup guides).",
+                *companion_lines,
                 "- When a skill drives external API writes, assume rate limits: prefer fewer "
                 "larger writes, avoid tight one-item loops, serialize bursts when possible, "
                 "and respect 429/Retry-After.",

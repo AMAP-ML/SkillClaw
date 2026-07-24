@@ -552,8 +552,8 @@ def inspect_hermes_config(cfg: "SkillClawConfig") -> dict[str, object]:
         from .config_store import ConfigStore
 
         companion_enabled = bool(ConfigStore().to_skillclaw_config().skills_include_companion_files)
-    except Exception:
-        pass
+    except Exception as e:
+        notes.append(f"Could not read SkillClaw config for companion-files setting ({e}); assuming enabled.")
     companion_coverage = "(skills dir unavailable)"
     if expected_skills_dir.is_dir():
         try:

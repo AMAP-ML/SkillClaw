@@ -40,7 +40,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 _LEGACY_SKILLCLAW_SKILLS_DIR = Path.home() / ".skillclaw" / "skills"
-_HERMES_HOME = Path.home() / ".hermes"
+_HERMES_HOME = Path(
+    os.environ.get("SKILLCLAW_HERMES_HOME")
+    or os.environ.get("HERMES_HOME")
+    or (Path.home() / ".hermes")
+)
 _HERMES_SKILLS_DIR = _HERMES_HOME / "skills"
 _HERMES_BACKUP_DIR = Path.home() / ".skillclaw" / "backups" / "hermes"
 _CODEX_HOME = Path.home() / ".codex"

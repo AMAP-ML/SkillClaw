@@ -7,6 +7,7 @@ Reads/writes ~/.skillclaw/config.yaml and bridges to SkillClawConfig.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,14 @@ from .config import SkillClawConfig
 CONFIG_DIR = Path.home() / ".skillclaw"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
 _DEFAULT_SKILLS_DIR = CONFIG_DIR / "skills"
-_DEFAULT_HERMES_SKILLS_DIR = Path.home() / ".hermes" / "skills"
+_DEFAULT_HERMES_SKILLS_DIR = (
+    Path(
+        os.environ.get("SKILLCLAW_HERMES_HOME")
+        or os.environ.get("HERMES_HOME")
+        or (Path.home() / ".hermes")
+    )
+    / "skills"
+)
 _DEFAULT_CODEX_SKILLS_DIR = Path.home() / ".codex" / "skills"
 _DEFAULT_CLAUDE_SKILLS_DIR = Path.home() / ".claude" / "skills"
 _DEFAULT_OPENCODE_SKILLS_DIR = Path.home() / ".config" / "opencode" / "skills"

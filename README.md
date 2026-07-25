@@ -463,6 +463,8 @@ Only the server operator needs `openclaw` for `--engine agent`.
 
 **Operational model** — Every user has their own `skillclaw` process and `~/.skillclaw/config.yaml`. Each group maps to a `group_id`; one evolve server watches that namespace, turns sessions into skills, and writes them back. Joining a group only requires the correct sharing config on the client side.
 
+**Beginner walkthrough** — [SkillClaw 快速理解（中文）](./docs/analysis/skillclaw.md)
+
 **First-run checks**
 
 | Command | Expected |

@@ -5,6 +5,7 @@ Interactive first-time setup wizard for SkillClaw.
 
 from __future__ import annotations
 
+import secrets
 from pathlib import Path
 
 from .claw_adapter import CLAW_TYPES
@@ -38,6 +39,10 @@ _PROVIDER_PRESETS = {
     "bedrock": {
         "api_base": "",
         "model_id": "us.anthropic.claude-sonnet-4-6",
+    },
+    "hermes-openai-codex": {
+        "api_base": "",
+        "model_id": "gpt-5.6-sol",
     },
     "custom": {
         "api_base": "",
@@ -91,6 +96,17 @@ def _prompt_choice(msg: str, choices: list[str], default: str = "") -> str:
         print(f"  Invalid choice. Pick one of: {choices}")
 
 
+def _validate_hermes_codex_oauth() -> None:
+    from .hermes_codex import HermesInstallationError, resolve_upstream
+
+    try:
+        resolve_upstream()
+    except HermesInstallationError as exc:
+        raise RuntimeError("Hermes runtime is unavailable. Install Hermes for this user and retry.") from exc
+    except Exception as exc:
+        raise RuntimeError("Hermes Codex OAuth is unavailable. Run `hermes auth add openai-codex` and retry.") from exc
+
+
 def _infer_existing_sharing_backend(current_sharing: dict) -> str:
     backend = str(current_sharing.get("backend", "") or "").strip().lower()
     if backend:
@@ -131,10 +147,22 @@ class SetupWizard:
         current_provider = current_llm.get("provider", "custom")
         provider = _prompt_choice(
             "LLM provider",
-            ["kimi", "qwen", "openai", "minimax", "novita", "openrouter", "bedrock", "custom"],
+            [
+                "kimi",
+                "qwen",
+                "openai",
+                "minimax",
+                "novita",
+                "openrouter",
+                "bedrock",
+                "hermes-openai-codex",
+                "custom",
+            ],
             default=current_provider,
         )
         preset = _PROVIDER_PRESETS[provider]
+        if provider == "hermes-openai-codex" and claw_type != "hermes":
+            raise ValueError("hermes-openai-codex is only supported with the Hermes CLI adapter")
         openrouter_config: dict = existing.get("openrouter", {})
         if provider == "bedrock":
             api_base = ""
@@ -147,6 +175,16 @@ class SetupWizard:
                 "AWS region",
                 default=current_llm.get("bedrock_region", "us-east-1"),
             )
+        elif provider == "hermes-openai-codex":
+            _validate_hermes_codex_oauth()
+            print("Uses Hermes-managed ChatGPT/Codex OAuth; no API key is stored in SkillClaw.")
+            api_base = ""
+            api_key = ""
+            model_id = _prompt(
+                "Codex model ID",
+                default=current_llm.get("model_id") or preset["model_id"],
+            )
+            bedrock_region = ""
         else:
             bedrock_region = ""
             api_base = _prompt(
@@ -223,9 +261,12 @@ class SetupWizard:
         # ---- PRM ----
         print("\n--- PRM (Quality Scoring) ---")
         current_prm = existing.get("prm", {})
+        default_prm_enabled = current_prm.get("enabled", True)
+        if provider == "hermes-openai-codex" and not current_prm.get("api_key") and not current_prm.get("url"):
+            default_prm_enabled = False
         prm_enabled = _prompt_bool(
             "Enable PRM response quality scoring",
-            default=current_prm.get("enabled", True),
+            default=default_prm_enabled,
         )
         prm_config: dict = {"enabled": False}
         if prm_enabled:
@@ -359,10 +400,19 @@ class SetupWizard:
         # ---- Write config ----
         proxy_config = dict(current_proxy)
         proxy_config["port"] = proxy_port
-        proxy_config.setdefault("host", "0.0.0.0")
+        if provider == "hermes-openai-codex":
+            proxy_config["host"] = "127.0.0.1"
+            proxy_config["api_key"] = str(current_proxy.get("api_key") or secrets.token_urlsafe(32))
+        else:
+            proxy_config.setdefault("host", "0.0.0.0")
         proxy_config["served_model_name"] = served_model_name or "skillclaw-model"
         default_api_mode = default_llm_api_mode_for_claw(claw_type)
-        llm_api_mode = str(current_llm.get("api_mode", default_api_mode) or default_api_mode)
+        if provider == "hermes-openai-codex":
+            llm_api_mode = "responses"
+        elif provider == current_llm.get("provider"):
+            llm_api_mode = str(current_llm.get("api_mode", default_api_mode) or default_api_mode)
+        else:
+            llm_api_mode = default_api_mode
         data = {
             "claw_type": claw_type,
             "llm": {

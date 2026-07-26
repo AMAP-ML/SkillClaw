@@ -23,6 +23,7 @@ Thumbs.db
 # Environment
 .env
 *.env.local
+.venv/
 
 # uv
 uv.lock

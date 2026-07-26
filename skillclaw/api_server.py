@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import copy
+import ipaddress
 import json
 import logging
 import os
@@ -47,9 +48,63 @@ _NON_STANDARD_BODY_KEYS = {
     "session_done",
     "turn_type",
     "_skillclaw_protocol",
+    "_skillclaw_codex_session_id",
 }
 _PROTOCOL_ANTHROPIC_MESSAGES = "anthropic_messages"
 _PROTOCOL_RESPONSES_COMPAT = "responses_compat"
+
+
+def _is_loopback_host(host: str) -> bool:
+    normalized = str(host or "").strip().strip("[]")
+    if normalized.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def _bearer_token(headers: dict[str, str]) -> str:
+    return headers.get("Authorization", "").removeprefix("Bearer ").strip()
+
+
+def _safe_upstream_error_text(response: Any, failed_token: str) -> str:
+    """Return bounded diagnostics without retaining an OAuth bearer."""
+    text = response.text[:200]
+    return text.replace(failed_token, "[REDACTED]") if failed_token else text
+
+
+def _recover_codex_auth(
+    headers: dict[str, str],
+    status_code: int,
+    seen_tokens: set[str],
+    *,
+    allow_auth_store_refresh: bool,
+) -> tuple[tuple[str, str, dict[str, str]] | None, bool]:
+    """Return an unseen pooled/refreshed credential and whether auth refresh ran."""
+    from .hermes_codex import recover_upstream, resolve_upstream
+
+    failed_token = _bearer_token(headers)
+    candidate = recover_upstream(failed_token, status_code=status_code)
+    if candidate is not None and candidate[1] not in seen_tokens:
+        return candidate, False
+    if status_code == 401 and allow_auth_store_refresh:
+        try:
+            candidate = resolve_upstream(force_refresh=True)
+        except Exception:
+            candidate = None
+        if candidate is not None and candidate[1] not in seen_tokens:
+            return candidate, True
+        return None, True
+    return None, False
+
+
+async def _prefetched_stream(first_chunk: bytes | None, stream: Any):
+    """Replay a prefetched chunk, then continue the original async stream."""
+    if first_chunk is not None:
+        yield first_chunk
+    async for chunk in stream:
+        yield chunk
 
 
 # ------------------------------------------------------------------ #
@@ -1434,6 +1489,8 @@ class SkillClawAPIServer:
         prm_scorer: Optional[PRMScorer] = None,
         last_request_tracker=None,
     ):
+        if config.llm_provider == "hermes-openai-codex" and not config.proxy_api_key:
+            raise ValueError("hermes-openai-codex requires proxy.api_key")
         self.config = config
         self._sampling_client = sampling_client
         self.skill_manager = skill_manager
@@ -1621,6 +1678,7 @@ class SkillClawAPIServer:
             authorization: Optional[str] = Header(default=None),
             x_session_id: Optional[str] = Header(default=None),
             codex_session_id: Optional[str] = Header(default=None, alias="session_id"),
+            x_client_request_id: Optional[str] = Header(default=None, alias="x-client-request-id"),
             x_turn_type: Optional[str] = Header(default=None),
             x_session_done: Optional[str] = Header(default=None),
         ):
@@ -1633,22 +1691,25 @@ class SkillClawAPIServer:
                 record_body = copy.deepcopy(body)
                 turn_type = _resolve_turn_type(x_turn_type, body.get("turn_type"), default="main")
                 injected_skills = owner._prepare_native_responses_body_inplace(body, turn_type=turn_type)
-                _raw_sid = x_session_id or codex_session_id or body.get("session_id") or ""
+                _raw_sid = x_session_id or codex_session_id or x_client_request_id or body.get("session_id") or ""
                 session_id = _raw_sid or await owner._resolve_tui_session(
                     body.get("model", owner._served_model),
                     len(body.get("input", []) if isinstance(body.get("input"), list) else []),
                 )
+                body["_skillclaw_codex_session_id"] = session_id
                 session_done = _resolve_session_done(x_session_done, body.get("session_done"))
                 if bool(body.get("stream", False)):
+                    stream = owner._stream_and_track_responses(
+                        body,
+                        record_body=record_body,
+                        session_id=session_id,
+                        turn_type=turn_type,
+                        injected_skills=injected_skills,
+                        session_done=session_done,
+                    )
+                    first_chunk = await anext(stream, None)
                     return StreamingResponse(
-                        owner._stream_and_track_responses(
-                            body,
-                            record_body=record_body,
-                            session_id=session_id,
-                            turn_type=turn_type,
-                            injected_skills=injected_skills,
-                            session_done=session_done,
-                        ),
+                        _prefetched_stream(first_chunk, stream),
                         media_type="text/event-stream",
                     )
                 response_payload = await owner._forward_to_llm_responses(body)
@@ -2550,6 +2611,7 @@ class SkillClawAPIServer:
         Supports providers:
           - ``"openai"`` (default) — any OpenAI-compatible ``/v1/chat/completions`` endpoint.
           - ``"openrouter"`` — OpenRouter gateway (OpenAI-compatible + routing extensions).
+          - ``"hermes-openai-codex"`` — Hermes-owned ChatGPT/Codex OAuth with runtime refresh.
           - ``"bedrock"`` — AWS Bedrock Converse API via :class:`BedrockChatClient`.
         """
         if self.config.llm_provider == "bedrock":
@@ -2560,18 +2622,31 @@ class SkillClawAPIServer:
         """Return whether /v1/responses should be forwarded as Responses API."""
         return str(getattr(self.config, "llm_api_mode", "chat") or "chat").lower() == "responses"
 
+    def _upstream_auth(self, *, force_refresh: bool = False) -> tuple[str, str, dict[str, str]]:
+        """Return the configured upstream endpoint, bearer, and transport headers."""
+        if self.config.llm_provider == "hermes-openai-codex":
+            try:
+                from .hermes_codex import resolve_upstream
+
+                return resolve_upstream(force_refresh=force_refresh)
+            except Exception as exc:
+                raise HTTPException(status_code=503, detail="Hermes Codex OAuth is unavailable") from exc
+        return self.config.llm_api_base.rstrip("/"), self.config.llm_api_key, {}
+
     def _prepare_responses_forward(
         self,
         body: dict[str, Any],
         *,
         stream: bool,
+        force_refresh: bool = False,
+        upstream_auth: tuple[str, str, dict[str, str]] | None = None,
     ) -> tuple[str, dict[str, Any], dict[str, str]]:
         """Build URL, body, and headers for native Responses forwarding.
 
         Native mode intentionally keeps Responses-only tools (custom, web_search,
         namespace, etc.) untouched instead of converting the request to chat.
         """
-        api_base = self.config.llm_api_base.rstrip("/")
+        api_base, api_key, headers = upstream_auth or self._upstream_auth(force_refresh=force_refresh)
         if not api_base:
             raise HTTPException(
                 status_code=503,
@@ -2581,10 +2656,15 @@ class SkillClawAPIServer:
         send_body = {k: v for k, v in body.items() if k not in _NON_STANDARD_BODY_KEYS}
         send_body["model"] = self.config.llm_model_id or body.get("model", "")
         send_body["stream"] = stream
-
-        headers: dict[str, str] = {}
-        if self.config.llm_api_key:
-            headers["Authorization"] = f"Bearer {self.config.llm_api_key}"
+        headers = dict(headers)
+        if self.config.llm_provider == "hermes-openai-codex":
+            send_body.pop("max_output_tokens", None)
+            cache_scope_id = str(body.get("_skillclaw_codex_session_id") or "").strip()
+            if cache_scope_id:
+                headers["session_id"] = cache_scope_id
+                headers["x-client-request-id"] = cache_scope_id
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         return f"{api_base}/responses", send_body, headers
 
     def _prepare_native_responses_body(self, body: dict[str, Any], *, turn_type: str) -> dict[str, Any]:
@@ -2693,10 +2773,21 @@ class SkillClawAPIServer:
         """Forward a Codex Responses payload to an upstream Responses API."""
         import httpx
 
-        url, send_body, headers = self._prepare_responses_forward(body, stream=False)
-
-        max_retries = 3
-        for attempt in range(max_retries):
+        max_transient_retries = 3
+        transient_attempt = 0
+        upstream_override = None
+        seen_tokens: set[str] = set()
+        auth_store_refresh_used = False
+        while True:
+            url, send_body, headers = self._prepare_responses_forward(
+                body,
+                stream=False,
+                upstream_auth=upstream_override,
+            )
+            upstream_override = None
+            failed_token = _bearer_token(headers)
+            if failed_token:
+                seen_tokens.add(failed_token)
             try:
                 async with httpx.AsyncClient(timeout=_llm_request_timeout_seconds()) as client:
                     resp = await client.post(
@@ -2707,31 +2798,50 @@ class SkillClawAPIServer:
                     resp.raise_for_status()
                     return resp.json()
             except httpx.HTTPStatusError as e:
-                response_text = e.response.text[:200]
-                if attempt < max_retries - 1:
-                    wait = min(2**attempt + random.uniform(0, 1), 10)
+                status_code = e.response.status_code
+                response_text = _safe_upstream_error_text(e.response, failed_token)
+                if self.config.llm_provider == "hermes-openai-codex" and status_code in {401, 429}:
+                    upstream_override, refresh_attempted = _recover_codex_auth(
+                        headers,
+                        status_code,
+                        seen_tokens,
+                        allow_auth_store_refresh=not auth_store_refresh_used,
+                    )
+                    auth_store_refresh_used |= refresh_attempted
+                    if upstream_override is not None:
+                        logger.warning("[Codex] recovered upstream credential after HTTP %d", status_code)
+                        continue
+                if self.config.llm_provider == "hermes-openai-codex" and status_code in {401, 429}:
+                    raise HTTPException(
+                        status_code=status_code,
+                        detail=f"Upstream Responses error: {status_code}",
+                    ) from e
+                if transient_attempt < max_transient_retries - 1:
+                    wait = min(2**transient_attempt + random.uniform(0, 1), 10)
                     logger.warning(
                         "[OpenClaw] upstream Responses error (attempt %d/%d), retrying in %.1fs: %s %s",
-                        attempt + 1,
-                        max_retries,
+                        transient_attempt + 1,
+                        max_transient_retries,
                         wait,
                         e.response.status_code,
                         response_text,
                     )
+                    transient_attempt += 1
                     await asyncio.sleep(wait)
                     continue
                 logger.error("[OpenClaw] upstream Responses error: %s %s", e.response.status_code, response_text)
                 raise HTTPException(status_code=502, detail=f"Upstream Responses error: {e}") from e
             except Exception as e:
-                if attempt < max_retries - 1:
-                    wait = min(2**attempt + random.uniform(0, 1), 10)
+                if transient_attempt < max_transient_retries - 1:
+                    wait = min(2**transient_attempt + random.uniform(0, 1), 10)
                     logger.warning(
                         "[OpenClaw] Responses forward failed (attempt %d/%d), retrying in %.1fs: %s",
-                        attempt + 1,
-                        max_retries,
+                        transient_attempt + 1,
+                        max_transient_retries,
                         wait,
                         e,
                     )
+                    transient_attempt += 1
                     await asyncio.sleep(wait)
                     continue
                 logger.error("[OpenClaw] Responses forward failed: %s", e, exc_info=True)
@@ -2853,27 +2963,59 @@ class SkillClawAPIServer:
         """Passthrough upstream Responses SSE without aggregating or rewriting events."""
         import httpx
 
-        url, send_body, headers = self._prepare_responses_forward(body, stream=True)
-        try:
-            async with httpx.AsyncClient(timeout=_llm_request_timeout_seconds()) as client:
-                async with client.stream("POST", url, json=send_body, headers=headers) as resp:
-                    resp.raise_for_status()
-                    async for chunk in resp.aiter_bytes():
-                        if chunk:
-                            yield chunk
-        except httpx.HTTPStatusError as e:
-            response_text = e.response.text[:200]
-            logger.error("[OpenClaw] upstream Responses stream error: %s %s", e.response.status_code, response_text)
-            raise HTTPException(status_code=502, detail=f"Upstream Responses stream error: {e}") from e
-        except Exception as e:
-            logger.error("[OpenClaw] Responses stream failed: %s", e, exc_info=True)
-            raise HTTPException(status_code=502, detail=f"Responses stream error: {e}") from e
+        upstream_override = None
+        seen_tokens: set[str] = set()
+        auth_store_refresh_used = False
+        while True:
+            url, send_body, headers = self._prepare_responses_forward(
+                body,
+                stream=True,
+                upstream_auth=upstream_override,
+            )
+            upstream_override = None
+            failed_token = _bearer_token(headers)
+            if failed_token:
+                seen_tokens.add(failed_token)
+            try:
+                async with httpx.AsyncClient(timeout=_llm_request_timeout_seconds()) as client:
+                    async with client.stream("POST", url, json=send_body, headers=headers) as resp:
+                        if getattr(resp, "status_code", 200) >= 400:
+                            await resp.aread()
+                        resp.raise_for_status()
+                        async for chunk in resp.aiter_bytes():
+                            if chunk:
+                                yield chunk
+                return
+            except httpx.HTTPStatusError as e:
+                status_code = e.response.status_code
+                response_text = _safe_upstream_error_text(e.response, failed_token)
+                if self.config.llm_provider == "hermes-openai-codex" and status_code in {401, 429}:
+                    upstream_override, refresh_attempted = _recover_codex_auth(
+                        headers,
+                        status_code,
+                        seen_tokens,
+                        allow_auth_store_refresh=not auth_store_refresh_used,
+                    )
+                    auth_store_refresh_used |= refresh_attempted
+                    if upstream_override is not None:
+                        logger.warning("[Codex] recovered streaming credential after HTTP %d", status_code)
+                        continue
+                logger.error("[OpenClaw] upstream Responses stream error: %s %s", status_code, response_text)
+                if self.config.llm_provider == "hermes-openai-codex" and status_code in {401, 429}:
+                    raise HTTPException(
+                        status_code=status_code,
+                        detail=f"Upstream Responses stream error: {status_code}",
+                    ) from e
+                raise HTTPException(status_code=502, detail=f"Upstream Responses stream error: {e}") from e
+            except Exception as e:
+                logger.error("[OpenClaw] Responses stream failed: %s", e, exc_info=True)
+                raise HTTPException(status_code=502, detail=f"Responses stream error: {e}") from e
 
     async def _forward_to_llm_openai(self, body: dict[str, Any]) -> dict[str, Any]:
         """Forward to an OpenAI-compatible API."""
         import httpx
 
-        api_base = self.config.llm_api_base.rstrip("/")
+        api_base, api_key, headers = self._upstream_auth()
         if not api_base:
             raise HTTPException(
                 status_code=503,
@@ -2885,9 +3027,9 @@ class SkillClawAPIServer:
         send_body["model"] = self.config.llm_model_id or body.get("model", "")
         send_body["stream"] = False
 
-        headers: dict[str, str] = {}
-        if self.config.llm_api_key:
-            headers["Authorization"] = f"Bearer {self.config.llm_api_key}"
+        headers = dict(headers)
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
 
         # OpenRouter-specific headers and body extensions
         if self.config.llm_provider == "openrouter":

@@ -309,11 +309,8 @@ class SkillManager:
         return result
 
     def _skill_md_paths(self) -> list[str]:
-        if self._is_hermes_skill_root():
-            pattern = os.path.join(self._skills_dir, "**", "SKILL.md")
-            return sorted(glob.glob(pattern, recursive=True))
-        pattern = os.path.join(self._skills_dir, "*", "SKILL.md")
-        return sorted(glob.glob(pattern))
+        pattern = os.path.join(self._skills_dir, "**", "SKILL.md")
+        return sorted(glob.glob(pattern, recursive=True))
 
     def _compute_skills_fingerprint(self) -> tuple[tuple[str, int, int], ...]:
         fingerprint: list[tuple[str, int, int]] = []
@@ -332,9 +329,27 @@ class SkillManager:
         return tuple(fingerprint)
 
     def _is_hermes_skill_root(self) -> bool:
-        return os.path.realpath(self._skills_dir) == os.path.realpath(
-            os.path.join(os.path.expanduser("~"), ".hermes", "skills")
-        )
+        skills = os.path.realpath(self._skills_dir)
+        # Match any .hermes/skills or .hermes/profiles/*/skills path
+        parts = skills.split(os.sep)
+        try:
+            hermes_idx = parts.index(".hermes")
+        except ValueError:
+            return False
+        if hermes_idx + 2 > len(parts):
+            return False
+        # .hermes/skills
+        if parts[hermes_idx + 1] == "skills" and hermes_idx + 2 == len(parts):
+            return True
+        # .hermes/profiles/<name>/skills
+        if (
+            hermes_idx + 4 <= len(parts)
+            and parts[hermes_idx + 1] == "profiles"
+            and parts[hermes_idx + 3] == "skills"
+            and hermes_idx + 4 == len(parts)
+        ):
+            return True
+        return False
 
     def _skill_dir_path(self, skill: dict) -> str:
         name = str(skill.get("name", "unknown") or "unknown").strip()

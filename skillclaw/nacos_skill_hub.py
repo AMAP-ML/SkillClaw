@@ -511,7 +511,7 @@ class NacosSkillHub:
             }
 
         local_dirs_by_name = {}
-        for skill_md in Path(skills_dir).glob("**/SKILL.md" if _is_hermes_skill_root(skills_dir) else "*/SKILL.md"):
+        for skill_md in Path(skills_dir).glob("**/SKILL.md"):
             local_dirs_by_name.setdefault(skill_md.parent.name, []).append(str(skill_md.parent))
 
         downloaded = skipped = deleted = failed = 0

@@ -350,6 +350,7 @@ class EvolveServerConfig:
             llm_base_url=llm_base_url,
             llm_model=llm_model,
             llm_api_type=llm_api_type,
+            llm_max_tokens=int(os.environ.get("EVOLVE_LLM_MAX_TOKENS", "8192")),
             evolve_strategy=os.environ.get("EVOLVE_STRATEGY", "dynamic_edit_conservative"),
             use_success_feedback=os.environ.get("EVOLVE_USE_SUCCESS_FEEDBACK", "1").lower() not in {"0", "false", "no"},
             evolve_batch_size=int(os.environ.get("EVOLVE_BATCH_SIZE", "20")),

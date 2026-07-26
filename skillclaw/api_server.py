@@ -2655,10 +2655,14 @@ class SkillClawAPIServer:
 
         send_body = {k: v for k, v in body.items() if k not in _NON_STANDARD_BODY_KEYS}
         send_body["model"] = self.config.llm_model_id or body.get("model", "")
-        send_body["stream"] = stream
+        # Codex only accepts upstream SSE. The non-streaming first hop below
+        # consumes response.completed and returns its JSON response body.
+        send_body["stream"] = True if self.config.llm_provider == "hermes-openai-codex" else stream
         headers = dict(headers)
         if self.config.llm_provider == "hermes-openai-codex":
             send_body.pop("max_output_tokens", None)
+            # ChatGPT Codex Responses rejects persisted response storage.
+            send_body["store"] = False
             cache_scope_id = str(body.get("_skillclaw_codex_session_id") or "").strip()
             if cache_scope_id:
                 headers["session_id"] = cache_scope_id
@@ -2790,11 +2794,70 @@ class SkillClawAPIServer:
                 seen_tokens.add(failed_token)
             try:
                 async with httpx.AsyncClient(timeout=_llm_request_timeout_seconds()) as client:
-                    resp = await client.post(
-                        url,
-                        json=send_body,
-                        headers=headers,
-                    )
+                    if self.config.llm_provider == "hermes-openai-codex":
+                        async with client.stream("POST", url, json=send_body, headers=headers) as resp:
+                            if resp.status_code >= 400:
+                                await resp.aread()
+                            resp.raise_for_status()
+                            buffer = ""
+                            output_items: dict[int, dict[str, Any]] = {}
+                            async for chunk in resp.aiter_text():
+                                buffer += chunk
+                                while "\n" in buffer:
+                                    line, buffer = buffer.split("\n", 1)
+                                    if not line.startswith("data: "):
+                                        continue
+                                    raw = line[6:].strip()
+                                    if raw == "[DONE]":
+                                        continue
+                                    event = json.loads(raw)
+                                    output_index = int(event.get("output_index", 0) or 0)
+                                    if event.get("type") in {"response.output_item.added", "response.output_item.done"}:
+                                        item = event.get("item")
+                                        if isinstance(item, dict):
+                                            output_items[output_index] = item
+                                    elif event.get("type") in {
+                                        "response.output_text.delta",
+                                        "response.output_text.done",
+                                    }:
+                                        item = output_items.setdefault(
+                                            output_index,
+                                            {
+                                                "type": "message",
+                                                "role": "assistant",
+                                                "status": "completed",
+                                                "content": [],
+                                            },
+                                        )
+                                        content_index = int(event.get("content_index", 0) or 0)
+                                        content = item.get("content")
+                                        if not isinstance(content, list):
+                                            content = []
+                                            item["content"] = content
+                                        while len(content) <= content_index:
+                                            content.append({"type": "output_text", "text": "", "annotations": []})
+                                        part = content[content_index]
+                                        part["text"] = (
+                                            str(event.get("text") or "")
+                                            if event.get("type") == "response.output_text.done"
+                                            else str(part.get("text") or "") + str(event.get("delta") or "")
+                                        )
+                                    if event.get("type") in {
+                                        "response.completed",
+                                        "response.incomplete",
+                                        "response.failed",
+                                    }:
+                                        response = event.get("response")
+                                        if isinstance(response, dict):
+                                            if output_items and not response.get("output"):
+                                                response = {
+                                                    **response,
+                                                    "output": [item for _, item in sorted(output_items.items())],
+                                                }
+                                            return response
+                            raise RuntimeError("Codex stream ended before response.completed")
+
+                    resp = await client.post(url, json=send_body, headers=headers)
                     resp.raise_for_status()
                     return resp.json()
             except httpx.HTTPStatusError as e:

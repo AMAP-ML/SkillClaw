@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import sys
@@ -73,11 +74,11 @@ def test_hermes_codex_responses_preserve_native_transport(monkeypatch):
             "max_output_tokens": 4096,
             "_skillclaw_codex_session_id": "session-test",
         },
-        stream=True,
+        stream=False,
     )
 
     assert url == "https://chatgpt.com/backend-api/codex/responses"
-    assert body == {"model": "gpt-5.6-sol", "stream": True}
+    assert body == {"model": "gpt-5.6-sol", "stream": True, "store": False}
     assert headers == {
         "Authorization": "Bearer runtime-token",
         "User-Agent": "codex_cli_rs/0.0.0 (Hermes Agent)",
@@ -390,6 +391,19 @@ async def test_nonstreaming_401_forces_one_oauth_refresh(monkeypatch):
             self.status_code = status_code
             self.text = "unauthorized" if status_code == 401 else "ok"
 
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def aread(self):
+            return self.text.encode()
+
+        async def aiter_text(self):
+            if self.status_code == 200:
+                yield f"data: {json.dumps({'type': 'response.completed', 'response': self.json()})}\n\n"
+
         def raise_for_status(self):
             if self.status_code == 401:
                 request = httpx.Request("POST", "https://upstream.test/responses")
@@ -410,6 +424,10 @@ async def test_nonstreaming_401_forces_one_oauth_refresh(monkeypatch):
             return False
 
         async def post(self, url, json, headers):
+            status = 401 if headers["Authorization"] == "Bearer stale-token" else 200
+            return FakeResponse(status)
+
+        def stream(self, method, url, json, headers):
             status = 401 if headers["Authorization"] == "Bearer stale-token" else 200
             return FakeResponse(status)
 
@@ -435,6 +453,19 @@ async def test_nonstreaming_429_exhausts_pool_until_success(monkeypatch):
             self.status_code = 429 if token != "healthy-token" else 200
             self.text = "quota exhausted"
 
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def aread(self):
+            return self.text.encode()
+
+        async def aiter_text(self):
+            if self.status_code == 200:
+                yield f"data: {json.dumps({'type': 'response.completed', 'response': self.json()})}\n\n"
+
         def raise_for_status(self):
             if self.status_code == 429:
                 request = httpx.Request("POST", "https://upstream.test/responses")
@@ -459,6 +490,11 @@ async def test_nonstreaming_429_exhausts_pool_until_success(monkeypatch):
             sent_tokens.append(token)
             return FakeResponse(token)
 
+        def stream(self, method, url, json, headers):
+            token = headers["Authorization"].removeprefix("Bearer ")
+            sent_tokens.append(token)
+            return FakeResponse(token)
+
     def rotate(token, *, status_code):
         rotations.append((token, status_code))
         next_token = {"old-token": "next-token", "next-token": "healthy-token"}.get(token)
@@ -476,6 +512,72 @@ async def test_nonstreaming_429_exhausts_pool_until_success(monkeypatch):
     assert await server._forward_to_llm_responses({"model": "gpt-5.6-sol"}) == {"id": "resp-healthy"}
     assert sent_tokens == ["old-token", "next-token", "healthy-token"]
     assert rotations == [("old-token", 429), ("next-token", 429)]
+
+
+@pytest.mark.asyncio
+async def test_nonstreaming_codex_sse_assembles_output_and_preserves_incomplete_status(monkeypatch):
+    events = [
+        {
+            "type": "response.output_item.added",
+            "output_index": 0,
+            "item": {"type": "message", "role": "assistant", "status": "in_progress", "content": []},
+        },
+        {"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": "hello "},
+        {"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": "world"},
+        {
+            "type": "response.incomplete",
+            "response": {"id": "resp-incomplete", "status": "incomplete", "output": []},
+        },
+    ]
+
+    class FakeResponse:
+        status_code = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def aiter_text(self):
+            for event in events:
+                yield f"data: {json.dumps(event)}\n\n"
+
+        def raise_for_status(self):
+            return None
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, method, url, json, headers):
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        "skillclaw.hermes_codex.resolve_upstream",
+        lambda **_: ("https://upstream.test", "runtime-token", {}),
+    )
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    server = object.__new__(SkillClawAPIServer)
+    server.config = SkillClawConfig(llm_provider="hermes-openai-codex", llm_api_mode="responses")
+
+    response = await server._forward_to_llm_responses({"model": "gpt-5.6-sol"})
+
+    assert response["status"] == "incomplete"
+    assert response["output"] == [
+        {
+            "type": "message",
+            "role": "assistant",
+            "status": "in_progress",
+            "content": [{"type": "output_text", "text": "hello world", "annotations": []}],
+        }
+    ]
 
 
 @pytest.mark.asyncio

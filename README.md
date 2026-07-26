@@ -212,7 +212,7 @@ The setup wizard prompts for the provider, model, local skills directory, PRM se
 For a minimal first run:
 
 - choose `none` for the CLI agent if you do not want SkillClaw to auto-configure an external agent yet
-- local skills at `~/.skillclaw/skills` for the generic setup path; if you choose Hermes, Codex, or Claude Code, the default local library becomes `~/.hermes/skills`, `~/.codex/skills`, or `~/.claude/skills`
+- local skills at `~/.skillclaw/skills` for the generic setup path; if you choose Hermes, Codex, or Claude Code, the default local library becomes `$HERMES_HOME/skills` (or `~/.hermes/skills` when unset), `~/.codex/skills`, or `~/.claude/skills`
 - disable shared storage if you only want to use the local proxy first
 - enable local shared storage only if you want to add the evolve server later on the same machine, and use a dedicated root such as `~/.skillclaw/local-share`
 - disable PRM if you want the cheapest first pass
@@ -239,8 +239,8 @@ If you already use Hermes, the client-side path is:
 1. Install Hermes first.
 2. Run `skillclaw setup` and choose `hermes` for `CLI agent to configure`.
 3. Keep `Proxy model name exposed to agents` as `skillclaw-model` unless you have a specific reason to change it.
-4. Start SkillClaw. On startup, SkillClaw rewrites `~/.hermes/config.yaml` to point Hermes at the local proxy.
-5. Hermes uses `~/.hermes/skills` as the default local skill library. SkillClaw prepares that directory automatically and copies in any missing legacy skills from `~/.skillclaw/skills`.
+4. Start SkillClaw. On startup, SkillClaw rewrites `$HERMES_HOME/config.yaml` (or `~/.hermes/config.yaml` when unset) to point Hermes at the local proxy.
+5. Hermes uses `$HERMES_HOME/skills` (or `~/.hermes/skills` when unset) as the default local skill library. SkillClaw prepares that directory automatically and copies in any missing legacy skills from `~/.skillclaw/skills`.
 6. If you want to inspect or undo the integration, use `skillclaw doctor hermes` and `skillclaw restore hermes`.
 
 Minimal verification:
@@ -258,6 +258,12 @@ skillclaw restore hermes
 ```
 
 `skillclaw doctor hermes` reports whether Hermes is pointed at the local proxy, whether the Hermes skills directory exists, whether legacy skills are still present, and that session boundaries still fall back to proxy-side heuristics unless Hermes sends explicit session headers.
+
+#### Hermes-managed ChatGPT / Codex OAuth
+
+Choose `hermes-openai-codex` as the upstream provider in `skillclaw setup` when Hermes already owns a ChatGPT/Codex OAuth login. SkillClaw resolves a fresh bearer through Hermes for each upstream request; it never stores the OAuth access or refresh token in `~/.skillclaw/config.yaml`.
+
+This route registers a named loopback provider with Hermes's native `codex_responses` wire mode, while SkillClaw owns the separate upstream `openai-codex` OAuth hop. Setup generates a local proxy key, forces `127.0.0.1`, and validates the Hermes OAuth login without storing OAuth access or refresh tokens. Start with `skillclaw start --daemon`, then verify the complete route with `skillclaw doctor hermes` and a `hermes chat` exact-reply query.
 
 ### Path B: Join an existing shared group
 

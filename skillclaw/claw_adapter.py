@@ -23,6 +23,7 @@ it in ``_ADAPTERS``.
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -32,6 +33,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -40,7 +42,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 _LEGACY_SKILLCLAW_SKILLS_DIR = Path.home() / ".skillclaw" / "skills"
-_HERMES_HOME = Path.home() / ".hermes"
+_HERMES_HOME = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes").expanduser()
 _HERMES_SKILLS_DIR = _HERMES_HOME / "skills"
 _HERMES_BACKUP_DIR = Path.home() / ".skillclaw" / "backups" / "hermes"
 _CODEX_HOME = Path.home() / ".codex"
@@ -426,12 +428,42 @@ def _prepare_external_skills_dir(target_dir: Path, label: str) -> None:
         )
 
 
+def _is_loopback_skillclaw_url(value: object) -> bool:
+    try:
+        parsed = urlsplit(str(value or ""))
+    except ValueError:
+        return False
+    return parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"} and parsed.path == "/v1"
+
+
+def _is_managed_legacy_hermes_provider(entry: object) -> bool:
+    return (
+        isinstance(entry, dict)
+        and entry.get("name") == "skillclaw"
+        and _is_loopback_skillclaw_url(entry.get("base_url") or entry.get("api"))
+    )
+
+
+def _is_managed_codex_hermes_provider(entry: object) -> bool:
+    return (
+        isinstance(entry, dict)
+        and entry.get("name") == "SkillClaw Codex OAuth proxy"
+        and entry.get("transport") == "codex_responses"
+        and _is_loopback_skillclaw_url(entry.get("api") or entry.get("base_url"))
+    )
+
+
+def _hermes_profile_backup_dir() -> Path:
+    profile_key = hashlib.sha256(str(_HERMES_HOME.resolve()).encode()).hexdigest()[:12]
+    return _HERMES_BACKUP_DIR / profile_key
+
+
 def _backup_hermes_config_if_changed(config_path: Path, new_text: str) -> Path | None:
     """Save the current Hermes config before overwriting it, if it changed."""
     return _backup_text_file_if_changed(
         config_path,
         new_text,
-        backup_dir=_HERMES_BACKUP_DIR,
+        backup_dir=_hermes_profile_backup_dir(),
         backup_stem="config",
         backup_suffix="yaml",
         label="Hermes config",
@@ -439,7 +471,12 @@ def _backup_hermes_config_if_changed(config_path: Path, new_text: str) -> Path |
 
 
 def _latest_hermes_backup_path() -> Path | None:
-    return _latest_backup_path(_HERMES_BACKUP_DIR, "config", "yaml")
+    profile_backup = _latest_backup_path(_hermes_profile_backup_dir(), "config", "yaml")
+    if profile_backup is not None:
+        return profile_backup
+    if _HERMES_HOME == Path.home() / ".hermes":
+        return _latest_backup_path(_HERMES_BACKUP_DIR, "config", "yaml")
+    return None
 
 
 def _write_json_mapping_atomic(path: Path, data: dict, label: str) -> None:
@@ -470,25 +507,65 @@ def _write_json_mapping_atomic(path: Path, data: dict, label: str) -> None:
 
 
 def _configure_hermes(cfg: "SkillClawConfig") -> None:
-    """Auto-configure Hermes to route model traffic through SkillClaw."""
+    """Route Hermes through SkillClaw, preserving the upstream protocol mode."""
     config_path = _HERMES_HOME / "config.yaml"
-    model_id = cfg.served_model_name or cfg.llm_model_id or "skillclaw-model"
     api_key = cfg.proxy_api_key or "skillclaw"
     base_url = f"http://127.0.0.1:{cfg.proxy_port}/v1"
+    uses_hermes_codex_oauth = cfg.llm_provider == "hermes-openai-codex"
     _prepare_hermes_skills_dir(cfg)
 
     data = _load_yaml_mapping(config_path, "Hermes")
+    providers = data.get("custom_providers")
+    if not isinstance(providers, list):
+        providers = []
+    providers = [entry for entry in providers if not _is_managed_legacy_hermes_provider(entry)]
+
+    named_providers = data.get("providers")
+    if not isinstance(named_providers, dict):
+        named_providers = {}
+    else:
+        named_providers = dict(named_providers)
+    existing_codex_provider = named_providers.get("skillclaw-codex")
+    if (
+        uses_hermes_codex_oauth
+        and existing_codex_provider
+        and not _is_managed_codex_hermes_provider(existing_codex_provider)
+    ):
+        raise ValueError("Hermes provider name 'skillclaw-codex' is already user-owned")
+    if _is_managed_codex_hermes_provider(existing_codex_provider):
+        named_providers.pop("skillclaw-codex", None)
+
     model = data.get("model")
     if not isinstance(model, dict):
         model = {"default": model} if isinstance(model, str) and model.strip() else {}
 
-    model["provider"] = "custom"
-    model["base_url"] = base_url
-    model["default"] = model_id
-    model["api_key"] = api_key
-    # Clear stale provider-specific mode so Hermes auto-detects from the proxy URL.
-    model["api_mode"] = ""
+    if uses_hermes_codex_oauth:
+        upstream_model = cfg.llm_model_id or cfg.served_model_name or "skillclaw-model"
+        named_providers["skillclaw-codex"] = {
+            "name": "SkillClaw Codex OAuth proxy",
+            "api": base_url,
+            "api_key": api_key,
+            "default_model": upstream_model,
+            "transport": "codex_responses",
+        }
+        model["provider"] = "custom:skillclaw-codex"
+        model["default"] = upstream_model
+        model.pop("base_url", None)
+        model.pop("api_key", None)
+        model.pop("api_mode", None)
+    else:
+        model_id = cfg.served_model_name or cfg.llm_model_id or "skillclaw-model"
+        model["provider"] = "custom"
+        model["base_url"] = base_url
+        model["default"] = model_id
+        model["api_key"] = api_key
+        model["api_mode"] = ""
 
+    data["custom_providers"] = providers
+    if named_providers:
+        data["providers"] = named_providers
+    else:
+        data.pop("providers", None)
     data["model"] = model
     _backup_hermes_config_if_changed(config_path, _yaml_mapping_to_text(data))
     _write_yaml_mapping_atomic(config_path, data, "Hermes")
@@ -497,7 +574,12 @@ def _configure_hermes(cfg: "SkillClawConfig") -> None:
 def inspect_hermes_config(cfg: "SkillClawConfig") -> dict[str, object]:
     """Return a diagnostic snapshot of the local Hermes integration state."""
     config_path = _HERMES_HOME / "config.yaml"
-    expected_model = cfg.served_model_name or cfg.llm_model_id or "skillclaw-model"
+    uses_hermes_codex_oauth = cfg.llm_provider == "hermes-openai-codex"
+    expected_model = (
+        cfg.llm_model_id or cfg.served_model_name or "skillclaw-model"
+        if uses_hermes_codex_oauth
+        else cfg.served_model_name or cfg.llm_model_id or "skillclaw-model"
+    )
     expected_base_url = f"http://127.0.0.1:{cfg.proxy_port}/v1"
     expected_api_key = cfg.proxy_api_key or "skillclaw"
     expected_skills_dir = Path(str(getattr(cfg, "skills_dir", "") or _HERMES_SKILLS_DIR)).expanduser()
@@ -506,19 +588,36 @@ def inspect_hermes_config(cfg: "SkillClawConfig") -> dict[str, object]:
     model = data.get("model") if isinstance(data, dict) else {}
     if not isinstance(model, dict):
         model = {"default": model} if isinstance(model, str) and model else {}
-
     configured_provider = str(model.get("provider", "") or "")
-    configured_base_url = str(model.get("base_url", "") or "")
     configured_default = str(model.get("default", "") or "")
-    configured_api_key = str(model.get("api_key", "") or "")
+    if uses_hermes_codex_oauth:
+        named_providers = data.get("providers")
+        named_provider = named_providers.get("skillclaw-codex", {}) if isinstance(named_providers, dict) else {}
+        if not isinstance(named_provider, dict):
+            named_provider = {}
+        configured_base_url = str(named_provider.get("api") or named_provider.get("base_url") or "")
+        configured_api_key = str(named_provider.get("api_key", "") or "")
+        configured_api_mode = str(named_provider.get("transport") or named_provider.get("api_mode") or "")
+        proxy_match = (
+            configured_provider == "custom:skillclaw-codex"
+            and configured_base_url == expected_base_url
+            and configured_default == expected_model
+            and configured_api_key == expected_api_key
+            and configured_api_mode == "codex_responses"
+        )
+    else:
+        configured_base_url = str(model.get("base_url", "") or "")
+        configured_api_key = str(model.get("api_key", "") or "")
+        configured_api_mode = str(model.get("api_mode", "") or "")
+        proxy_match = (
+            configured_provider == "custom"
+            and configured_base_url == expected_base_url
+            and configured_default == expected_model
+            and configured_api_key == expected_api_key
+            and not configured_api_mode
+        )
 
     backup_path = _latest_hermes_backup_path()
-    proxy_match = (
-        configured_provider == "custom"
-        and configured_base_url == expected_base_url
-        and configured_default == expected_model
-        and configured_api_key == expected_api_key
-    )
     legacy_present = _LEGACY_SKILLCLAW_SKILLS_DIR.is_dir()
     uses_default_skills_dir = expected_skills_dir == _HERMES_SKILLS_DIR
     issues: list[str] = []
@@ -529,11 +628,24 @@ def inspect_hermes_config(cfg: "SkillClawConfig") -> dict[str, object]:
     ]
     next_steps: list[str] = []
 
+    if uses_hermes_codex_oauth:
+        from .hermes_codex import HermesInstallationError, resolve_upstream
+
+        try:
+            resolve_upstream()
+            notes.append("Hermes Codex OAuth credential resolution succeeded.")
+        except HermesInstallationError:
+            issues.append("Hermes runtime modules are unavailable to SkillClaw.")
+            next_steps.append("Install Hermes for this user, then retry `skillclaw doctor hermes`.")
+        except Exception:
+            issues.append("Hermes Codex OAuth credentials are unavailable.")
+            next_steps.append("Run `hermes auth add openai-codex`, then retry `skillclaw doctor hermes`.")
+
     if not config_path.exists():
-        issues.append("Hermes config is missing: ~/.hermes/config.yaml")
+        issues.append(f"Hermes config is missing: {config_path}")
     if not proxy_match:
         issues.append("Hermes model routing is not pointing at the local SkillClaw proxy.")
-        next_steps.append("Start SkillClaw once so it can rewrite ~/.hermes/config.yaml.")
+        next_steps.append(f"Start SkillClaw once so it can rewrite {config_path}.")
     if not expected_skills_dir.is_dir():
         issues.append(f"Hermes skills directory is missing: {expected_skills_dir}")
         next_steps.append(f"Create or prepare the Hermes skills directory: {expected_skills_dir}")
@@ -572,7 +684,7 @@ def inspect_hermes_config(cfg: "SkillClawConfig") -> dict[str, object]:
 
 
 def restore_hermes_config(backup_path: Path | None = None) -> dict[str, str]:
-    """Restore ~/.hermes/config.yaml from the latest or a specified backup."""
+    """Restore the active HERMES_HOME config from the latest or a specified backup."""
     source = Path(backup_path).expanduser() if backup_path is not None else _latest_hermes_backup_path()
     if source is None or not source.exists():
         raise FileNotFoundError("No Hermes backup found")

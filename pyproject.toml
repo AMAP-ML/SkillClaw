@@ -38,6 +38,11 @@ server = [
     "oss2",
     "python-dotenv",
 ]
+# Test suite
+test = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+]
 # Everything
 all = [
     "skillclaw[embedding,evolve,sharing,server]",

@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from skillclaw import claw_adapter, hermes_codex
 from skillclaw.api_server import SkillClawAPIServer
 from skillclaw.config import SkillClawConfig
+from skillclaw.config_store import resolve_skills_dir
 
 
 def _oauth_result(*, force_refresh: bool = False):
@@ -49,6 +50,18 @@ def test_resolve_upstream_reuses_hermes_credentials_and_headers(monkeypatch):
         "runtime-token",
         {"originator": "codex_cli_rs", "token-seen": "runtime-token"},
     )
+
+
+def test_resolve_upstream_rejects_non_chatgpt_oauth_endpoint(monkeypatch):
+    monkeypatch.setattr(hermes_codex, "_select_pool_credential", lambda base_url, token: (base_url, token))
+    monkeypatch.setattr(
+        hermes_codex,
+        "_resolver",
+        lambda: (lambda **_: {"base_url": "https://evil.test/codex", "api_key": "secret"}, lambda _: {}),
+    )
+
+    with pytest.raises(RuntimeError, match="not trusted"):
+        hermes_codex.resolve_upstream()
 
 
 def test_hermes_codex_upstream_uses_runtime_oauth(monkeypatch):
@@ -96,6 +109,17 @@ def test_oauth_proxy_rejects_unauthenticated_non_loopback_bind():
                 llm_provider="hermes-openai-codex",
                 proxy_host="0.0.0.0",
                 proxy_api_key="",
+            )
+        )
+
+
+def test_oauth_proxy_rejects_authenticated_non_loopback_bind():
+    with pytest.raises(ValueError, match="loopback proxy.host"):
+        SkillClawAPIServer(
+            SkillClawConfig(
+                llm_provider="hermes-openai-codex",
+                proxy_host="0.0.0.0",
+                proxy_api_key="local-proxy-key",
             )
         )
 
@@ -237,6 +261,64 @@ def test_configure_hermes_generic_provider_keeps_generic_proxy_mode(monkeypatch,
     assert claw_adapter.inspect_hermes_config(cfg)["proxy_match"] is True
 
 
+def test_configure_hermes_preserves_user_owned_reserved_provider_names(monkeypatch, tmp_path: Path):
+    hermes_home = tmp_path / ".hermes"
+    hermes_home.mkdir()
+    config_path = hermes_home / "config.yaml"
+    user_legacy = {"name": "skillclaw", "base_url": "https://user-provider.test/v1"}
+    user_named = {"name": "User provider", "api": "https://user-provider.test/v1"}
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "model": {"provider": "openai", "default": "model"},
+                "custom_providers": [user_legacy],
+                "providers": {"skillclaw-codex": user_named},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(claw_adapter, "_HERMES_HOME", hermes_home)
+    monkeypatch.setattr(claw_adapter, "_HERMES_SKILLS_DIR", hermes_home / "skills")
+    monkeypatch.setattr(claw_adapter, "_HERMES_BACKUP_DIR", tmp_path / "backups")
+    monkeypatch.setattr(claw_adapter, "_LEGACY_SKILLCLAW_SKILLS_DIR", tmp_path / "legacy")
+
+    claw_adapter._configure_hermes(
+        SkillClawConfig(
+            claw_type="hermes",
+            llm_provider="openrouter",
+            llm_model_id="upstream-model",
+            proxy_api_key="local-key",
+        )
+    )
+
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert data["custom_providers"] == [user_legacy]
+    assert data["providers"]["skillclaw-codex"] == user_named
+
+
+def test_configure_hermes_codex_refuses_user_owned_provider_collision(monkeypatch, tmp_path: Path):
+    hermes_home = tmp_path / ".hermes"
+    hermes_home.mkdir()
+    config_path = hermes_home / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump({"providers": {"skillclaw-codex": {"name": "User provider", "api": "https://user.test"}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(claw_adapter, "_HERMES_HOME", hermes_home)
+    monkeypatch.setattr(claw_adapter, "_HERMES_SKILLS_DIR", hermes_home / "skills")
+    monkeypatch.setattr(claw_adapter, "_LEGACY_SKILLCLAW_SKILLS_DIR", tmp_path / "legacy")
+
+    with pytest.raises(ValueError, match="already user-owned"):
+        claw_adapter._configure_hermes(
+            SkillClawConfig(
+                claw_type="hermes",
+                llm_provider="hermes-openai-codex",
+                llm_model_id="gpt-5.6-sol",
+                proxy_api_key="local-key",
+            )
+        )
+
+
 def test_doctor_reports_missing_hermes_oauth(monkeypatch, tmp_path: Path):
     cfg = SkillClawConfig(
         claw_type="hermes",
@@ -297,10 +379,36 @@ def test_adapter_uses_hermes_home_environment_in_fresh_process(tmp_path: Path):
     assert result.stdout.splitlines() == [str(hermes_home), str(hermes_home / "skills")]
 
 
+def test_config_store_migrates_legacy_hermes_skills_default(monkeypatch, tmp_path: Path):
+    hermes_home = tmp_path / "profile-home"
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+
+    assert resolve_skills_dir(str(Path.home() / ".hermes" / "skills"), claw_type="hermes") == str(
+        hermes_home / "skills"
+    )
+
+
+def test_hermes_backups_are_isolated_by_profile(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(claw_adapter, "_HERMES_BACKUP_DIR", tmp_path / "backups")
+    profile_a = tmp_path / "profile-a"
+    profile_b = tmp_path / "profile-b"
+    for profile, original in ((profile_a, "A\n"), (profile_b, "B\n")):
+        profile.mkdir()
+        (profile / "config.yaml").write_text(original, encoding="utf-8")
+        monkeypatch.setattr(claw_adapter, "_HERMES_HOME", profile)
+        claw_adapter._backup_hermes_config_if_changed(profile / "config.yaml", "changed\n")
+
+    monkeypatch.setattr(claw_adapter, "_HERMES_HOME", profile_a)
+    (profile_a / "config.yaml").write_text("changed\n", encoding="utf-8")
+    claw_adapter.restore_hermes_config()
+
+    assert (profile_a / "config.yaml").read_text(encoding="utf-8") == "A\n"
+
+
 def test_recover_upstream_refreshes_matching_pool_entry(monkeypatch):
     refreshed = SimpleNamespace(
         runtime_api_key="fresh-token",
-        base_url="https://fresh.test/codex",
+        base_url="https://chatgpt.com/backend-api/codex",
         inference_base_url=None,
     )
 
@@ -312,7 +420,11 @@ def test_recover_upstream_refreshes_matching_pool_entry(monkeypatch):
         def mark_exhausted_and_rotate(self, **kwargs):
             raise AssertionError("successful refresh must not rotate")
 
-    monkeypatch.setattr(hermes_codex, "_pool_runtime", lambda: (FakePool(), "https://default.test"))
+    monkeypatch.setattr(
+        hermes_codex,
+        "_pool_runtime",
+        lambda: (FakePool(), "https://chatgpt.com/backend-api/codex"),
+    )
     monkeypatch.setattr(
         hermes_codex,
         "_resolver",
@@ -320,10 +432,49 @@ def test_recover_upstream_refreshes_matching_pool_entry(monkeypatch):
     )
 
     assert hermes_codex.recover_upstream("stale-token", status_code=401) == (
-        "https://fresh.test/codex",
+        "https://chatgpt.com/backend-api/codex",
         "fresh-token",
         {"account-token": "fresh-token"},
     )
+
+
+def test_recover_upstream_refreshes_each_pool_entry_once(monkeypatch):
+    entry = SimpleNamespace(
+        id="credential-1",
+        runtime_api_key="stale-token",
+        base_url="https://chatgpt.com/backend-api/codex",
+        inference_base_url=None,
+    )
+    refreshes = []
+    rotations = []
+
+    class FakePool:
+        _entries = [entry]
+
+        def try_refresh_matching(self, *, api_key_hint):
+            refreshes.append(api_key_hint)
+            entry.runtime_api_key = "fresh-token"
+            return entry
+
+        def mark_exhausted_and_rotate(self, **kwargs):
+            rotations.append(kwargs["api_key_hint"])
+            return None
+
+    monkeypatch.setattr(
+        hermes_codex,
+        "_pool_runtime",
+        lambda: (FakePool(), "https://chatgpt.com/backend-api/codex"),
+    )
+    monkeypatch.setattr(hermes_codex, "_resolver", lambda: (lambda **_: {}, lambda _: {}))
+    refreshed_ids: set[str] = set()
+
+    assert (
+        hermes_codex.recover_upstream("stale-token", status_code=401, refreshed_credential_ids=refreshed_ids)
+        is not None
+    )
+    assert hermes_codex.recover_upstream("fresh-token", status_code=401, refreshed_credential_ids=refreshed_ids) is None
+    assert refreshes == ["stale-token"]
+    assert rotations == ["fresh-token"]
 
 
 def test_recover_upstream_never_persists_upstream_error_body(monkeypatch):
@@ -495,7 +646,7 @@ async def test_nonstreaming_429_exhausts_pool_until_success(monkeypatch):
             sent_tokens.append(token)
             return FakeResponse(token)
 
-    def rotate(token, *, status_code):
+    def rotate(token, *, status_code, **_):
         rotations.append((token, status_code))
         next_token = {"old-token": "next-token", "next-token": "healthy-token"}.get(token)
         return ("https://upstream.test", next_token, {}) if next_token else None
@@ -512,6 +663,64 @@ async def test_nonstreaming_429_exhausts_pool_until_success(monkeypatch):
     assert await server._forward_to_llm_responses({"model": "gpt-5.6-sol"}) == {"id": "resp-healthy"}
     assert sent_tokens == ["old-token", "next-token", "healthy-token"]
     assert rotations == [("old-token", 429), ("next-token", 429)]
+
+
+@pytest.mark.asyncio
+async def test_nonstreaming_codex_auth_recovery_is_bounded(monkeypatch):
+    attempts = []
+    recoveries = []
+
+    class FakeResponse:
+        status_code = 401
+        text = "unauthorized"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def aread(self):
+            return b"unauthorized"
+
+        def raise_for_status(self):
+            request = httpx.Request("POST", "https://upstream.test/responses")
+            response = httpx.Response(401, request=request, text=self.text)
+            raise httpx.HTTPStatusError("unauthorized", request=request, response=response)
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, method, url, json, headers):
+            attempts.append(headers["Authorization"])
+            return FakeResponse()
+
+    def recover(token, *, status_code, **_):
+        recoveries.append((token, status_code))
+        return "https://upstream.test", f"token-{len(recoveries)}", {}
+
+    monkeypatch.setattr(
+        "skillclaw.hermes_codex.resolve_upstream",
+        lambda **_: ("https://upstream.test", "token-0", {}),
+    )
+    monkeypatch.setattr("skillclaw.hermes_codex.recover_upstream", recover)
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    server = object.__new__(SkillClawAPIServer)
+    server.config = SkillClawConfig(llm_provider="hermes-openai-codex", llm_api_mode="responses")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await server._forward_to_llm_responses({"model": "gpt-5.6-sol"})
+
+    assert exc_info.value.status_code == 401
+    assert len(recoveries) == 8
+    assert len(attempts) == 9
 
 
 @pytest.mark.asyncio
@@ -701,7 +910,7 @@ async def test_streaming_429_reads_error_and_exhausts_pool_until_success(monkeyp
                 )
             return FakeStreamContext(response)
 
-    def rotate(token, *, status_code):
+    def rotate(token, *, status_code, **_):
         rotations.append((token, status_code))
         next_token = {"old-token": "next-token", "next-token": "healthy-token"}.get(token)
         if next_token is None:

@@ -8,10 +8,36 @@ import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlsplit
 
 
 class HermesInstallationError(RuntimeError):
     """Hermes runtime modules cannot be imported from the active installation."""
+
+
+def _validated_codex_base_url(value: str) -> str:
+    """Keep Hermes OAuth bearers on the canonical ChatGPT Codex endpoint."""
+    normalized = str(value or "").strip().rstrip("/")
+    parsed = urlsplit(normalized)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "chatgpt.com"
+        or parsed.port not in {None, 443}
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path.rstrip("/") != "/backend-api/codex"
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise RuntimeError("Hermes Codex OAuth endpoint is not trusted")
+    return normalized
+
+
+def _pool_credential_id(pool, token: str) -> str:
+    for entry in getattr(pool, "_entries", ()):
+        if str(getattr(entry, "runtime_api_key", "") or "") == token:
+            return str(getattr(entry, "id", "") or "")
+    return ""
 
 
 def _runtime_imports() -> tuple[Callable, Callable]:
@@ -74,11 +100,21 @@ def recover_upstream(
     failed_token: str,
     *,
     status_code: int,
+    refreshed_credential_ids: set[str] | None = None,
 ) -> tuple[str, str, dict[str, str]] | None:
     """Refresh/rotate the failed pooled credential and return a retry credential."""
     try:
         pool, default_base_url = _pool_runtime()
-        next_entry = pool.try_refresh_matching(api_key_hint=failed_token) if status_code == 401 else None
+        refreshed_credential_ids = refreshed_credential_ids if refreshed_credential_ids is not None else set()
+        failed_credential_id = _pool_credential_id(pool, failed_token)
+        can_refresh = status_code == 401 and (
+            not failed_credential_id or failed_credential_id not in refreshed_credential_ids
+        )
+        next_entry = pool.try_refresh_matching(api_key_hint=failed_token) if can_refresh else None
+        if next_entry is not None:
+            refreshed_id = str(getattr(next_entry, "id", "") or failed_credential_id)
+            if refreshed_id:
+                refreshed_credential_ids.add(refreshed_id)
         if next_entry is None:
             next_entry = pool.mark_exhausted_and_rotate(
                 status_code=status_code,
@@ -88,7 +124,7 @@ def recover_upstream(
         if next_entry is None or not next_entry.runtime_api_key:
             return None
         token = next_entry.runtime_api_key
-        base_url = str(next_entry.base_url or next_entry.inference_base_url or default_base_url).rstrip("/")
+        base_url = _validated_codex_base_url(next_entry.base_url or next_entry.inference_base_url or default_base_url)
         _, header_builder = _resolver()
         return base_url, token, header_builder(token)
     except Exception:
@@ -119,4 +155,4 @@ def resolve_upstream(*, force_refresh: bool = False) -> tuple[str, str, dict[str
     if not base_url or not api_key:
         raise RuntimeError("Hermes has no usable Codex OAuth credential")
     base_url, api_key = _select_pool_credential(base_url, api_key)
-    return base_url, api_key, header_builder(api_key)
+    return _validated_codex_base_url(base_url), api_key, header_builder(api_key)

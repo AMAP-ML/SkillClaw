@@ -7,6 +7,7 @@ Reads/writes ~/.skillclaw/config.yaml and bridges to SkillClawConfig.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,7 @@ from .config import SkillClawConfig
 CONFIG_DIR = Path.home() / ".skillclaw"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
 _DEFAULT_SKILLS_DIR = CONFIG_DIR / "skills"
-_DEFAULT_HERMES_SKILLS_DIR = Path.home() / ".hermes" / "skills"
+_LEGACY_DEFAULT_HERMES_SKILLS_DIR = Path.home() / ".hermes" / "skills"
 _DEFAULT_CODEX_SKILLS_DIR = Path.home() / ".codex" / "skills"
 _DEFAULT_CLAUDE_SKILLS_DIR = Path.home() / ".claude" / "skills"
 _DEFAULT_OPENCODE_SKILLS_DIR = Path.home() / ".config" / "opencode" / "skills"
@@ -194,7 +195,8 @@ def default_skills_dir_for_claw(claw_type: str) -> Path:
     """Return the default local skills directory for the selected agent."""
     normalized = str(claw_type or "").strip().lower()
     if normalized == "hermes":
-        return _DEFAULT_HERMES_SKILLS_DIR
+        hermes_home = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes").expanduser()
+        return hermes_home / "skills"
     if normalized == "codex":
         return _DEFAULT_CODEX_SKILLS_DIR
     if normalized == "claude":
@@ -224,6 +226,8 @@ def resolve_skills_dir(skills_dir: Any, *, claw_type: str) -> str:
     if raw:
         expanded = Path(raw).expanduser()
         if normalized_claw in {"hermes", "codex", "claude", "opencode"} and expanded == generic_default:
+            return str(default_skills_dir_for_claw(normalized_claw))
+        if normalized_claw == "hermes" and expanded == _LEGACY_DEFAULT_HERMES_SKILLS_DIR:
             return str(default_skills_dir_for_claw(normalized_claw))
         return str(expanded)
 

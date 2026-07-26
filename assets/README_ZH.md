@@ -211,7 +211,7 @@ skillclaw setup
 第一次最小化验证时，推荐这样选：
 
 - `CLI agent` 选 `none`，先不要自动改外部 agent 配置
-- `skills` 目录保持默认值 `~/.skillclaw/skills`；如果你选了 Hermes、Codex 或 Claude Code，默认技能库会变成 `~/.hermes/skills`、`~/.codex/skills` 或 `~/.claude/skills`
+- `skills` 目录保持默认值 `~/.skillclaw/skills`；如果你选了 Hermes、Codex 或 Claude Code，默认技能库会变成 `$HERMES_HOME/skills`（未设置时为 `~/.hermes/skills`）、`~/.codex/skills` 或 `~/.claude/skills`
 - 如果你只是想先验证代理能不能正常用，可以先关闭 shared storage
 - 如果你后面想在同一台机器上继续跑本地 evolver 闭环，就把 shared storage 打开并选 `local` backend，例如 `~/.skillclaw/local-share`
 - 如果你想先把成本压到最低，可以先关闭 PRM
@@ -238,8 +238,8 @@ curl "http://127.0.0.1:${PROXY_PORT}/healthz"
 1. 先安装 Hermes。
 2. 运行 `skillclaw setup`，在 `CLI agent to configure` 里选择 `hermes`。
 3. `Proxy model name exposed to agents` 保持 `skillclaw-model`，除非你明确知道自己为什么要改它。
-4. 启动 SkillClaw。启动时，SkillClaw 会自动改写 `~/.hermes/config.yaml`，把 Hermes 指到本地代理。
-5. Hermes 默认使用 `~/.hermes/skills` 作为本地技能库。SkillClaw 会自动准备好该目录，并把 `~/.skillclaw/skills` 中遗留的旧技能复制过来。
+4. 启动 SkillClaw。启动时，SkillClaw 会自动改写 `$HERMES_HOME/config.yaml`（未设置时为 `~/.hermes/config.yaml`），把 Hermes 指到本地代理。
+5. Hermes 默认使用 `$HERMES_HOME/skills`（未设置时为 `~/.hermes/skills`）作为本地技能库。SkillClaw 会自动准备好该目录，并把 `~/.skillclaw/skills` 中遗留的旧技能复制过来。
 6. 如果你想检查或撤销集成，使用 `skillclaw doctor hermes` 和 `skillclaw restore hermes`。
 
 最小验证命令：
@@ -257,6 +257,12 @@ skillclaw restore hermes
 ```
 
 `skillclaw doctor hermes` 会检查 Hermes 是否指向了本地代理、Hermes skills 目录是否存在、旧技能是否还在、以及会话边界是否仍回退到代理侧的启发式策略（除非 Hermes 发送了显式的 session header）。
+
+#### 使用 Hermes 管理的 ChatGPT / Codex OAuth
+
+如果 Hermes 已经持有 ChatGPT/Codex OAuth 登录，可在 `skillclaw setup` 中选择 `hermes-openai-codex`。SkillClaw 每次请求都通过 Hermes 临时解析访问令牌，不会把 OAuth access token 或 refresh token 写入 `~/.skillclaw/config.yaml`。
+
+该模式仅绑定本机回环地址，使用独立的本地代理密钥，并通过 Hermes 原生 `codex_responses` 传输。启动后使用 `skillclaw doctor hermes` 和一次 `hermes chat` 精确回复测试验证完整链路。
 
 ### 路径 B：加入一个已有的共享群组
 

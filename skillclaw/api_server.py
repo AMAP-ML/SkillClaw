@@ -52,6 +52,7 @@ _NON_STANDARD_BODY_KEYS = {
 }
 _PROTOCOL_ANTHROPIC_MESSAGES = "anthropic_messages"
 _PROTOCOL_RESPONSES_COMPAT = "responses_compat"
+_MAX_CODEX_AUTH_RECOVERIES = 8
 
 
 def _is_loopback_host(host: str) -> bool:
@@ -80,12 +81,17 @@ def _recover_codex_auth(
     seen_tokens: set[str],
     *,
     allow_auth_store_refresh: bool,
+    refreshed_credential_ids: set[str],
 ) -> tuple[tuple[str, str, dict[str, str]] | None, bool]:
     """Return an unseen pooled/refreshed credential and whether auth refresh ran."""
     from .hermes_codex import recover_upstream, resolve_upstream
 
     failed_token = _bearer_token(headers)
-    candidate = recover_upstream(failed_token, status_code=status_code)
+    candidate = recover_upstream(
+        failed_token,
+        status_code=status_code,
+        refreshed_credential_ids=refreshed_credential_ids,
+    )
     if candidate is not None and candidate[1] not in seen_tokens:
         return candidate, False
     if status_code == 401 and allow_auth_store_refresh:
@@ -1489,8 +1495,11 @@ class SkillClawAPIServer:
         prm_scorer: Optional[PRMScorer] = None,
         last_request_tracker=None,
     ):
-        if config.llm_provider == "hermes-openai-codex" and not config.proxy_api_key:
-            raise ValueError("hermes-openai-codex requires proxy.api_key")
+        if config.llm_provider == "hermes-openai-codex":
+            if not config.proxy_api_key:
+                raise ValueError("hermes-openai-codex requires proxy.api_key")
+            if not _is_loopback_host(config.proxy_host):
+                raise ValueError("hermes-openai-codex requires a loopback proxy.host")
         self.config = config
         self._sampling_client = sampling_client
         self.skill_manager = skill_manager
@@ -2782,6 +2791,8 @@ class SkillClawAPIServer:
         upstream_override = None
         seen_tokens: set[str] = set()
         auth_store_refresh_used = False
+        auth_recovery_attempts = 0
+        refreshed_credential_ids: set[str] = set()
         while True:
             url, send_body, headers = self._prepare_responses_forward(
                 body,
@@ -2863,12 +2874,18 @@ class SkillClawAPIServer:
             except httpx.HTTPStatusError as e:
                 status_code = e.response.status_code
                 response_text = _safe_upstream_error_text(e.response, failed_token)
-                if self.config.llm_provider == "hermes-openai-codex" and status_code in {401, 429}:
+                if (
+                    self.config.llm_provider == "hermes-openai-codex"
+                    and status_code in {401, 429}
+                    and auth_recovery_attempts < _MAX_CODEX_AUTH_RECOVERIES
+                ):
+                    auth_recovery_attempts += 1
                     upstream_override, refresh_attempted = _recover_codex_auth(
                         headers,
                         status_code,
                         seen_tokens,
                         allow_auth_store_refresh=not auth_store_refresh_used,
+                        refreshed_credential_ids=refreshed_credential_ids,
                     )
                     auth_store_refresh_used |= refresh_attempted
                     if upstream_override is not None:
@@ -2920,8 +2937,9 @@ class SkillClawAPIServer:
         injected_skills: list[str],
         session_done: bool,
     ):
-        """Wrap _stream_llm_responses: passthrough SSE + parse response.completed inline."""
-        tracked = False
+        """Frame upstream SSE, record terminal events, and make truncation explicit."""
+        terminal_seen = False
+        emitted = False
         buf = ""
         output_items: dict[int, dict[str, Any]] = {}
         output_text_parts: dict[tuple[int, int], str] = {}
@@ -2979,7 +2997,7 @@ class SkillClawAPIServer:
                     text = str(part.get("text") or output_text_parts.get((output_index, content_index), ""))
                     output_text_parts[(output_index, content_index)] = text
                     apply_output_text(output_index, content_index, text)
-            elif event_type == "response.completed":
+            elif event_type in {"response.completed", "response.incomplete", "response.failed"}:
                 response_payload = data.get("response") if isinstance(data.get("response"), dict) else dict(data)
                 if output_items and not response_payload.get("output"):
                     response_payload = {
@@ -2989,38 +3007,59 @@ class SkillClawAPIServer:
                 return response_payload
             return None
 
-        async for chunk in self._stream_llm_responses(body):
-            if not tracked:
-                try:
-                    text = chunk.decode("utf-8", errors="ignore") if isinstance(chunk, bytes) else chunk
-                    buf += text
-                    while "\n" in buf:
-                        line, buf = buf.split("\n", 1)
-                        stripped = line.strip()
-                        if not stripped.startswith("data: "):
-                            continue
-                        raw = stripped[6:]
-                        if raw == "[DONE]":
-                            continue
+        def record_terminal(response_payload: dict[str, Any]) -> None:
+            self._record_responses_turn(
+                session_id,
+                record_body or body,
+                response_payload,
+                turn_type=turn_type,
+                injected_skills=injected_skills,
+                session_done=session_done,
+            )
+
+        try:
+            async for chunk in self._stream_llm_responses(body):
+                text = chunk.decode("utf-8", errors="ignore") if isinstance(chunk, bytes) else str(chunk)
+                buf += text.replace("\r\n", "\n")
+                while "\n\n" in buf:
+                    frame, buf = buf.split("\n\n", 1)
+                    raw_values = [line[6:] for line in frame.splitlines() if line.startswith("data: ")]
+                    if raw_values == ["[DONE]"]:
+                        continue
+                    for raw in raw_values:
                         try:
                             data = json.loads(raw)
                         except Exception:
                             continue
                         response_payload = parse_responses_stream_event(data) if isinstance(data, dict) else None
-                        if response_payload is not None:
-                            self._record_responses_turn(
-                                session_id,
-                                record_body or body,
-                                response_payload,
-                                turn_type=turn_type,
-                                injected_skills=injected_skills,
-                                session_done=session_done,
-                            )
-                            tracked = True
-                            break
-                except Exception:
-                    pass
-            yield chunk
+                        if response_payload is not None and not terminal_seen:
+                            record_terminal(response_payload)
+                            terminal_seen = True
+                    yield (frame + "\n\n").encode()
+                    emitted = True
+        except Exception:
+            if not emitted:
+                raise
+            logger.warning("[Codex] upstream Responses stream failed after downstream streaming began")
+
+        if terminal_seen:
+            yield b"data: [DONE]\n\n"
+            return
+        if not emitted:
+            raise HTTPException(status_code=502, detail="Upstream Responses stream ended without a terminal event")
+
+        failed_response = {
+            "status": "failed",
+            "output": [item for _, item in sorted(output_items.items())],
+            "error": {
+                "code": "upstream_stream_ended",
+                "message": "Upstream Responses stream ended without a terminal event",
+            },
+        }
+        record_terminal(failed_response)
+        failed_event = {"type": "response.failed", "response": failed_response}
+        yield ("data: " + json.dumps(failed_event, separators=(",", ":")) + "\n\n").encode()
+        yield b"data: [DONE]\n\n"
 
     async def _stream_llm_responses(self, body: dict[str, Any]):
         """Passthrough upstream Responses SSE without aggregating or rewriting events."""
@@ -3029,6 +3068,8 @@ class SkillClawAPIServer:
         upstream_override = None
         seen_tokens: set[str] = set()
         auth_store_refresh_used = False
+        auth_recovery_attempts = 0
+        refreshed_credential_ids: set[str] = set()
         while True:
             url, send_body, headers = self._prepare_responses_forward(
                 body,
@@ -3052,12 +3093,18 @@ class SkillClawAPIServer:
             except httpx.HTTPStatusError as e:
                 status_code = e.response.status_code
                 response_text = _safe_upstream_error_text(e.response, failed_token)
-                if self.config.llm_provider == "hermes-openai-codex" and status_code in {401, 429}:
+                if (
+                    self.config.llm_provider == "hermes-openai-codex"
+                    and status_code in {401, 429}
+                    and auth_recovery_attempts < _MAX_CODEX_AUTH_RECOVERIES
+                ):
+                    auth_recovery_attempts += 1
                     upstream_override, refresh_attempted = _recover_codex_auth(
                         headers,
                         status_code,
                         seen_tokens,
                         allow_auth_store_refresh=not auth_store_refresh_used,
+                        refreshed_credential_ids=refreshed_credential_ids,
                     )
                     auth_store_refresh_used |= refresh_attempted
                     if upstream_override is not None:

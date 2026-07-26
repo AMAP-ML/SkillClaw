@@ -416,7 +416,8 @@ async def test_stream_and_track_responses_records_before_completed_chunk_is_cons
     )
     first = await stream.__anext__()
     second = await stream.__anext__()
-    assert first + second == ("data: " + json.dumps(completed_event) + "\n\n").encode()
+    assert first == ("data: " + json.dumps(completed_event) + "\n\n").encode()
+    assert second == b"data: [DONE]\n\n"
     assert recorded == {
         "session_id": "codex-session-1",
         "request_body": {"model": "skillclaw-model", "instructions": "original instructions", "stream": True},
@@ -509,6 +510,71 @@ async def test_stream_and_track_responses_records_output_from_stream_events_when
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "terminal_type, status", [("response.incomplete", "incomplete"), ("response.failed", "failed")]
+)
+async def test_stream_and_track_responses_records_all_terminal_events(terminal_type, status):
+    server = object.__new__(SkillClawAPIServer)
+    recorded = []
+    event = {"type": terminal_type, "response": {"status": status, "output": []}}
+
+    async def fake_stream(_body):
+        yield ("data: " + json.dumps(event) + "\n\n").encode()
+        yield b"data: [DONE]\n\n"
+
+    def fake_record(_session_id, _request_body, response_payload, **_):
+        recorded.append(response_payload["status"])
+
+    server._stream_llm_responses = fake_stream
+    server._record_responses_turn = fake_record
+
+    chunks = [
+        chunk
+        async for chunk in server._stream_and_track_responses(
+            {"stream": True},
+            session_id="session",
+            turn_type="main",
+            injected_skills=[],
+            session_done=False,
+        )
+    ]
+
+    assert recorded == [status]
+    assert chunks[-1] == b"data: [DONE]\n\n"
+
+
+@pytest.mark.asyncio
+async def test_stream_and_track_responses_emits_failure_for_truncated_stream():
+    server = object.__new__(SkillClawAPIServer)
+    recorded = []
+
+    async def fake_stream(_body):
+        yield b'data: {"type":"response.created"}\n\n'
+        yield b"data: [DONE]\n\n"
+
+    def fake_record(_session_id, _request_body, response_payload, **_):
+        recorded.append(response_payload)
+
+    server._stream_llm_responses = fake_stream
+    server._record_responses_turn = fake_record
+
+    chunks = [
+        chunk
+        async for chunk in server._stream_and_track_responses(
+            {"stream": True},
+            session_id="session",
+            turn_type="main",
+            injected_skills=[],
+            session_done=False,
+        )
+    ]
+
+    assert json.loads(chunks[-2].decode().removeprefix("data: "))["type"] == "response.failed"
+    assert recorded[0]["error"]["code"] == "upstream_stream_ended"
+    assert chunks[-1] == b"data: [DONE]\n\n"
+
+
+@pytest.mark.asyncio
 async def test_responses_endpoint_passthroughs_native_stream():
     server = SkillClawAPIServer(
         SkillClawConfig(
@@ -522,6 +588,7 @@ async def test_responses_endpoint_passthroughs_native_stream():
 
     async def fake_stream(body):
         yield b'data: {"type":"response.created","upstream":true}\n\n'
+        yield b'data: {"type":"response.completed","response":{"status":"completed","output":[]}}\n\n'
         yield b"data: [DONE]\n\n"
 
     server._stream_llm_responses = fake_stream
@@ -536,7 +603,11 @@ async def test_responses_endpoint_passthroughs_native_stream():
         await client.aclose()
 
     assert response.status_code == 200
-    assert response.text == 'data: {"type":"response.created","upstream":true}\n\ndata: [DONE]\n\n'
+    assert response.text == (
+        'data: {"type":"response.created","upstream":true}\n\n'
+        'data: {"type":"response.completed","response":{"status":"completed","output":[]}}\n\n'
+        "data: [DONE]\n\n"
+    )
 
 
 @pytest.mark.asyncio

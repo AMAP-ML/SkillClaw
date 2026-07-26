@@ -473,7 +473,7 @@ def restore():
     help="Restore from a specific backup file instead of the latest Hermes backup.",
 )
 def restore_hermes(backup_path: str | None):
-    """Restore ~/.hermes/config.yaml from a saved backup."""
+    """Restore the active HERMES_HOME config from a saved backup."""
     from .claw_adapter import restore_hermes_config
 
     try:

@@ -65,6 +65,9 @@ class SkillClawConfig:
     # Upstream API surface: "chat" keeps the legacy chat-completions bridge;
     # "responses" forwards Codex /v1/responses payloads to an upstream Responses API.
     llm_api_mode: str = "chat"
+    # Optional provider region tag (e.g. "global_en" / "cn_zh") for providers that
+    # expose region-specific endpoints; otherwise empty.
+    llm_region: str = ""
 
     # ------------------------------------------------------------------ #
     # OpenRouter-specific (ignored for other providers)                    #

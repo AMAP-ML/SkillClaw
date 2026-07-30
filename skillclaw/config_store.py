@@ -351,6 +351,7 @@ class ConfigStore:
             llm_model_id=llm_model_id,
             llm_api_mode=llm_api_mode,
             bedrock_region=llm.get("bedrock_region") or data.get("bedrock_region", "us-east-1"),
+            llm_region=str(llm.get("region", "") or ""),
             # OpenRouter
             openrouter_app_name=orouter.get("app_name", "SkillClaw"),
             openrouter_app_url=orouter.get("app_url", ""),

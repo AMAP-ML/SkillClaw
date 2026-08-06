@@ -123,6 +123,7 @@ Everything above is what one user gets. Now scale it up: when you join a shared 
 
 ## News
 
+- **2026/08/06** — We’re excited to announce that [LongHorizon-Harness](https://github.com/AMAP-ML/LongHorizon-Harness) is now open source! It helps agents carry complex, long-horizon computer-use tasks across desktop apps and the CLI with durable state and verified progress. Welcome to follow the project, star the repository, and join the conversation.
 - **2026/04/22** — Added a bilingual dashboard with `skillclaw dashboard sync` and `skillclaw dashboard serve` for inspecting local/shared skills, validation progress, version history, and session traces.
 - **2026/04/20** — Added [Codex](https://github.com/openai/codex) and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) integration with proxy auto-configuration, native skills-directory defaults, and `doctor` / `restore` commands.
 - **2026/04/17** — Added [QwenPaw](https://github.com/agentscope-ai/QwenPaw) integration and updated the docs for broader multi-agent compatibility.

@@ -122,6 +122,7 @@ SkillClaw 不是让 Hermes 学更多，而是让它学到的一切，真正变�
 
 ## 动态
 
+- **2026/08/06** — 我们很高兴宣布 [LongHorizon-Harness](https://github.com/AMAP-ML/LongHorizon-Harness) 正式开源！它帮助 Agent 在桌面应用和命令行中持续完成复杂的长程计算机操作任务，并通过持久化状态和可验证进展保持任务连续推进。欢迎大家关注项目、点亮 Star，并参与交流。
 - **2026/04/22** — 新增支持中英文切换的 dashboard，可通过 `skillclaw dashboard sync` 和 `skillclaw dashboard serve` 查看本地 / 共享 skill、候选验证进度、版本历史与会话追溯。
 - **2026/04/20** — 新增 [Codex](https://github.com/openai/codex) 与 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 集成，支持自动接入代理、使用各自原生 skills 目录，并提供 `doctor` / `restore` 命令。
 - **2026/04/17** — 新增 [QwenPaw](https://github.com/agentscope-ai/QwenPaw) 集成，并同步更新文档以覆盖更多 Agent 框架。

@@ -2273,6 +2273,16 @@ class SkillClawAPIServer:
         except Exception:
             return
         self._apply_prm_result(session_id, turn_num, prm_result)
+        # _maybe_finalize_ready_turns (which also writes prm_scores.jsonl)
+        # only processes turns in _pending_turn_data, which is never
+        # populated anywhere. Persist the score here so judged turns are
+        # actually recorded.
+        try:
+            score = prm_result.get("score", 0.0) if isinstance(prm_result, dict) else 0.0
+            votes = prm_result.get("votes", []) if isinstance(prm_result, dict) else []
+            self._append_prm_record(session_id, turn_num, score, votes)
+        except Exception as e:
+            logger.warning("[PRM] record append failed: %s", e)
         if session_id in self._closing_sessions:
             return
         self._maybe_finalize_ready_turns(session_id)

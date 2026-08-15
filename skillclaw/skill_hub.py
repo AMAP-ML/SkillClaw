@@ -323,10 +323,12 @@ class SkillHub:
 
         Returns {"uploaded": N, "skipped": M, "filtered": F, "total_local": T}.
         """
-        if _is_hermes_skill_root(skills_dir):
-            paths = sorted(glob.glob(os.path.join(skills_dir, "**", "SKILL.md"), recursive=True))
-        else:
-            paths = sorted(glob.glob(os.path.join(skills_dir, "*", "SKILL.md")))
+        # тот же обход, что и у pull, — иначе вложенные примеры уезжают на хаб как отдельные скиллы
+        paths = sorted(
+            os.path.join(skill_dir, "SKILL.md")
+            for dirs in self._list_local_skill_dirs(skills_dir).values()
+            for skill_dir in dirs
+        )
         if not paths:
             logger.info("[SkillHub] no local skills to push")
             return {"uploaded": 0, "skipped": 0, "filtered": 0, "total_local": 0}
@@ -472,6 +474,10 @@ class SkillHub:
         if _is_hermes_skill_root(skills_dir):
             for path in sorted(glob.glob(os.path.join(skills_dir, "**", "SKILL.md"), recursive=True)):
                 skill_dir = os.path.dirname(path)
+                # раскладка hermes — <root>/<name> или <root>/<category>/<name>;
+                # SKILL.md глубже — это пример внутри чужого бандла, а не отдельный скилл
+                if len(os.path.relpath(skill_dir, skills_dir).split(os.sep)) > 2:
+                    continue
                 name = os.path.basename(skill_dir)
                 out.setdefault(name, []).append(skill_dir)
             return out
@@ -756,7 +762,11 @@ class SkillHub:
             remote_names = set(manifest.keys())
             local_names = set(local_skills.keys())
             for stale in sorted(local_names - remote_names):
-                shutil.rmtree(local_skills[stale], ignore_errors=False)
+                stale_dir = local_skills[stale]
+                # каталог мог уйти вместе с родительским скиллом — это не повод откатывать весь pull
+                if not os.path.isdir(stale_dir):
+                    continue
+                shutil.rmtree(stale_dir, ignore_errors=True)
                 deleted += 1
 
             for name in sorted(remote_names):

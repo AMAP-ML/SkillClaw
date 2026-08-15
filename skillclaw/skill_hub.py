@@ -15,12 +15,14 @@ Usage:
 
 from __future__ import annotations
 
+import fcntl
 import glob
 import hashlib
 import json
 import logging
 import os
 import shutil
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Collection, Optional
 
@@ -37,6 +39,42 @@ from .skill_bundle import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _pull_lock(skills_dir: str):
+    """Межпроцессный лок на pull: launchd-инстанс, поллер и CLI ходят в один каталог.
+
+    Отдаёт False, если pull уже идёт где-то ещё, — цикл просто пропускается.
+    """
+    lock_path = os.path.join(os.path.dirname(os.path.abspath(skills_dir)), ".skillclaw_pull.lock")
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def _restore_skills_dir(skills_dir: str, backup_dir: str, stamp: str) -> None:
+    """Откат на бэкап: сначала уводим сломанный каталог целиком, потом кладём копию.
+
+    rmtree по месту оставлял недоудалённые каталоги и валился на `Directory not empty`.
+    """
+    broken_dir = f"{skills_dir}.broken_{stamp}"
+    if os.path.isdir(skills_dir):
+        os.rename(skills_dir, broken_dir)
+    try:
+        shutil.copytree(backup_dir, skills_dir)
+    finally:
+        shutil.rmtree(broken_dir, ignore_errors=True)
 
 
 def _is_hermes_skill_root(skills_dir: str) -> bool:
@@ -559,6 +597,33 @@ class SkillHub:
         skip_names: Optional[Collection[str]] = None,
         include_names: Optional[Collection[str]] = None,
     ) -> dict[str, Any]:
+        """Serialize pulls across processes, then delegate to :meth:`_pull_skills_locked`."""
+        with _pull_lock(skills_dir) as acquired:
+            if not acquired:
+                logger.info("[SkillHub] pull already running in another process, cycle skipped")
+                return {
+                    "downloaded": 0,
+                    "skipped": 0,
+                    "deleted": 0,
+                    "total_remote": 0,
+                    "restored_from_backup": False,
+                    "backup_dir": "",
+                    "locked_out": True,
+                }
+            return self._pull_skills_locked(
+                skills_dir,
+                mirror=mirror,
+                skip_names=skip_names,
+                include_names=include_names,
+            )
+
+    def _pull_skills_locked(
+        self,
+        skills_dir: str,
+        mirror: bool = True,
+        skip_names: Optional[Collection[str]] = None,
+        include_names: Optional[Collection[str]] = None,
+    ) -> dict[str, Any]:
         """Mirror cloud skills to local directory with backup + rollback safety.
 
         Parameters
@@ -788,9 +853,7 @@ class SkillHub:
         except Exception as e:
             logger.warning("[SkillHub] mirror pull failed, restoring backup: %s", e)
             try:
-                if os.path.isdir(skills_dir):
-                    shutil.rmtree(skills_dir)
-                shutil.copytree(backup_dir, skills_dir)
+                _restore_skills_dir(skills_dir, backup_dir, stamp)
                 restored_from_backup = True
                 logger.info("[SkillHub] local skills restored from backup: %s", backup_dir)
             except Exception as restore_err:

@@ -892,6 +892,9 @@ def skills_pull():
     cfg, hub = _require_sharing(cs)
     click.echo(f"Pulling skills from {_sharing_target(cfg)} ...")
     result = hub.pull_skills(cfg.skills_dir)
+    if result.get("locked_out"):
+        click.echo("Skipped: another pull is already running (skills left untouched).")
+        return
     msg = (
         f"Done: {result['downloaded']} downloaded, "
         f"{result['skipped']} unchanged, "

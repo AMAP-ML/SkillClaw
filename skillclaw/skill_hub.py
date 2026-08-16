@@ -557,6 +557,31 @@ class SkillHub:
             shutil.rmtree(skill_dir)
             logger.info("[SkillHub] removed duplicate local skill dir: %s", skill_dir)
 
+    def _mirror_pull_is_noop(
+        self,
+        skills_dir: str,
+        manifest: dict[str, dict[str, Any]],
+        local_skills: dict[str, str],
+        local_dirs_by_name: dict[str, list[str]],
+        skip_set: set[str],
+    ) -> bool:
+        """True, если mirror-pull ничего не изменит: нет stale, дублей и расхождений по хэшу."""
+        if set(local_skills) - set(manifest):
+            return False
+        if any(len(dirs) > 1 for dirs in local_dirs_by_name.values()):
+            return False
+
+        for name, rec in manifest.items():
+            category = str(rec.get("category", "general") or "general")
+            target_dir = self._resolve_pull_target_dir(skills_dir, name, category, local_dirs_by_name)
+            if name in skip_set:
+                if not os.path.exists(os.path.join(target_dir, "SKILL.md")):
+                    return False
+                continue
+            if not os.path.isdir(target_dir) or not self._local_bundle_matches_record(target_dir, rec):
+                return False
+        return True
+
     @staticmethod
     def _prune_backups(backup_root: str, prefix: str, keep: int = 3) -> None:
         """Keep only newest `keep` backups for current skills dir."""
@@ -741,6 +766,19 @@ class SkillHub:
             return _result(
                 downloaded=downloaded,
                 skipped=skipped,
+                deleted=0,
+                total_remote=len(manifest),
+                restored_from_backup=False,
+                backup_dir="",
+            )
+
+        # Сверяем хэши до копирования: mirror-pull переписывает весь каталог (бэкап + staging)
+        # на каждом цикле поллера, а обычно менять нечего — 102 скилла копировались раз в 30 секунд.
+        if self._mirror_pull_is_noop(skills_dir, manifest, local_skills, local_dirs_by_name, skip_set):
+            logger.info("[SkillHub] pull complete: 0 downloaded, %d skipped, 0 deleted, %d total remote", len(manifest), len(manifest))
+            return _result(
+                downloaded=0,
+                skipped=len(manifest),
                 deleted=0,
                 total_remote=len(manifest),
                 restored_from_backup=False,

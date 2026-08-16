@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import glob
 import hashlib
 import os
 import shutil
@@ -16,6 +17,34 @@ _IGNORED_SUFFIXES = {".pyc", ".pyo"}
 
 class SkillBundleError(ValueError):
     """Raised when a bundle is malformed or a bundle path is unsafe."""
+
+
+def is_hermes_skill_root(skills_dir: str | os.PathLike[str]) -> bool:
+    """True для каталога скиллов hermes — он один допускает раскладку с категориями."""
+    return os.path.realpath(str(skills_dir)) == os.path.realpath(
+        os.path.join(os.path.expanduser("~"), ".hermes", "skills")
+    )
+
+
+def iter_skill_md_paths(skills_dir: str | os.PathLike[str]) -> list[str]:
+    """Пути к SKILL.md настоящих скиллов — единая точка обхода дерева.
+
+    Скиллом считается <root>/<name> или, в раскладке hermes, <root>/<category>/<name>.
+    SKILL.md глубже — пример или вложенный набор внутри чужого бандла: такие каталоги
+    ломали mirror-pull (удалялись как stale вместе с родителем) и засоряли каталог
+    скиллов, доступных агенту.
+    """
+    root = str(skills_dir)
+    if not is_hermes_skill_root(root):
+        return sorted(glob.glob(os.path.join(root, "*", _BUNDLE_ENTRYPOINT)))
+
+    out: list[str] = []
+    for path in glob.glob(os.path.join(root, "**", _BUNDLE_ENTRYPOINT), recursive=True):
+        rel = os.path.relpath(os.path.dirname(path), root)
+        if len(rel.split(os.sep)) > 2:
+            continue
+        out.append(path)
+    return sorted(out)
 
 
 def _coerce_bytes(data: bytes | bytearray | str) -> bytes:

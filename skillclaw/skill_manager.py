@@ -47,7 +47,6 @@ Valid categories: general, coding, research, data_analysis, security,
                   communication, automation, agentic, productivity, common_mistakes
 """
 
-import glob
 import hashlib
 import json
 import logging
@@ -59,7 +58,7 @@ from typing import Any, Dict, Optional
 
 import yaml
 
-from .skill_bundle import list_skill_bundle_paths
+from .skill_bundle import iter_skill_md_paths, list_skill_bundle_paths
 
 logger = logging.getLogger(__name__)
 
@@ -318,11 +317,7 @@ class SkillManager:
         return result
 
     def _skill_md_paths(self) -> list[str]:
-        if self._is_hermes_skill_root():
-            pattern = os.path.join(self._skills_dir, "**", "SKILL.md")
-            return sorted(glob.glob(pattern, recursive=True))
-        pattern = os.path.join(self._skills_dir, "*", "SKILL.md")
-        return sorted(glob.glob(pattern))
+        return iter_skill_md_paths(self._skills_dir)
 
     def _compute_skills_fingerprint(self) -> tuple[tuple[str, int, int], ...]:
         fingerprint: list[tuple[str, int, int]] = []

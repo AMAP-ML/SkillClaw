@@ -18,7 +18,7 @@ import yaml
 from evolve_server.core.skill_registry import SkillIDRegistry
 from evolve_server.core.utils import build_skill_md
 from evolve_server.storage.oss_helpers import fetch_version_bundle, load_version_bundle_record
-from skillclaw.skill_bundle import bundle_entrypoint_text, read_skill_bundle_with_meta
+from skillclaw.skill_bundle import bundle_entrypoint_text, iter_skill_md_paths, read_skill_bundle_with_meta
 
 from .config import SkillClawConfig
 from .skill_hub import SkillHub
@@ -241,7 +241,8 @@ def _load_local_skills(config: SkillClawConfig, warnings: list[str]) -> dict[str
         stats = {}
 
     skills: dict[str, dict[str, Any]] = {}
-    for skill_path in sorted(skills_dir.rglob("SKILL.md")):
+    for skill_md in iter_skill_md_paths(skills_dir):
+        skill_path = Path(skill_md)
         bundle_files, bundle_records, local_tree_sha = read_skill_bundle_with_meta(skill_path.parent)
         try:
             raw = bundle_entrypoint_text(bundle_files)

@@ -15,12 +15,13 @@ Usage:
 
 from __future__ import annotations
 
-import glob
+import fcntl
 import hashlib
 import json
 import logging
 import os
 import shutil
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Collection, Optional
 
@@ -32,11 +33,48 @@ from .skill_bundle import (
     bundle_file_records,
     bundle_has_only_entrypoint,
     bundle_tree_sha256,
+    iter_skill_md_paths,
     read_skill_bundle_with_meta,
     write_skill_bundle,
 )
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _pull_lock(skills_dir: str):
+    """Межпроцессный лок на pull: launchd-инстанс, поллер и CLI ходят в один каталог.
+
+    Отдаёт False, если pull уже идёт где-то ещё, — цикл просто пропускается.
+    """
+    lock_path = os.path.join(os.path.dirname(os.path.abspath(skills_dir)), ".skillclaw_pull.lock")
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def _restore_skills_dir(skills_dir: str, backup_dir: str, stamp: str) -> None:
+    """Откат на бэкап: сначала уводим сломанный каталог целиком, потом кладём копию.
+
+    rmtree по месту оставлял недоудалённые каталоги и валился на `Directory not empty`.
+    """
+    broken_dir = f"{skills_dir}.broken_{stamp}"
+    if os.path.isdir(skills_dir):
+        os.rename(skills_dir, broken_dir)
+    try:
+        shutil.copytree(backup_dir, skills_dir)
+    finally:
+        shutil.rmtree(broken_dir, ignore_errors=True)
 
 
 def _is_hermes_skill_root(skills_dir: str) -> bool:
@@ -323,10 +361,7 @@ class SkillHub:
 
         Returns {"uploaded": N, "skipped": M, "filtered": F, "total_local": T}.
         """
-        if _is_hermes_skill_root(skills_dir):
-            paths = sorted(glob.glob(os.path.join(skills_dir, "**", "SKILL.md"), recursive=True))
-        else:
-            paths = sorted(glob.glob(os.path.join(skills_dir, "*", "SKILL.md")))
+        paths = iter_skill_md_paths(skills_dir)
         if not paths:
             logger.info("[SkillHub] no local skills to push")
             return {"uploaded": 0, "skipped": 0, "filtered": 0, "total_local": 0}
@@ -469,18 +504,9 @@ class SkillHub:
         out: dict[str, list[str]] = {}
         if not os.path.isdir(skills_dir):
             return out
-        if _is_hermes_skill_root(skills_dir):
-            for path in sorted(glob.glob(os.path.join(skills_dir, "**", "SKILL.md"), recursive=True)):
-                skill_dir = os.path.dirname(path)
-                name = os.path.basename(skill_dir)
-                out.setdefault(name, []).append(skill_dir)
-            return out
-        for entry in os.scandir(skills_dir):
-            if not entry.is_dir():
-                continue
-            skill_md = os.path.join(entry.path, "SKILL.md")
-            if os.path.isfile(skill_md):
-                out.setdefault(entry.name, []).append(entry.path)
+        for path in iter_skill_md_paths(skills_dir):
+            skill_dir = os.path.dirname(path)
+            out.setdefault(os.path.basename(skill_dir), []).append(skill_dir)
         return out
 
     @classmethod
@@ -531,6 +557,31 @@ class SkillHub:
             shutil.rmtree(skill_dir)
             logger.info("[SkillHub] removed duplicate local skill dir: %s", skill_dir)
 
+    def _mirror_pull_is_noop(
+        self,
+        skills_dir: str,
+        manifest: dict[str, dict[str, Any]],
+        local_skills: dict[str, str],
+        local_dirs_by_name: dict[str, list[str]],
+        skip_set: set[str],
+    ) -> bool:
+        """True, если mirror-pull ничего не изменит: нет stale, дублей и расхождений по хэшу."""
+        if set(local_skills) - set(manifest):
+            return False
+        if any(len(dirs) > 1 for dirs in local_dirs_by_name.values()):
+            return False
+
+        for name, rec in manifest.items():
+            category = str(rec.get("category", "general") or "general")
+            target_dir = self._resolve_pull_target_dir(skills_dir, name, category, local_dirs_by_name)
+            if name in skip_set:
+                if not os.path.exists(os.path.join(target_dir, "SKILL.md")):
+                    return False
+                continue
+            if not os.path.isdir(target_dir) or not self._local_bundle_matches_record(target_dir, rec):
+                return False
+        return True
+
     @staticmethod
     def _prune_backups(backup_root: str, prefix: str, keep: int = 3) -> None:
         """Keep only newest `keep` backups for current skills dir."""
@@ -547,6 +598,33 @@ class SkillHub:
                 pass
 
     def pull_skills(
+        self,
+        skills_dir: str,
+        mirror: bool = True,
+        skip_names: Optional[Collection[str]] = None,
+        include_names: Optional[Collection[str]] = None,
+    ) -> dict[str, Any]:
+        """Serialize pulls across processes, then delegate to :meth:`_pull_skills_locked`."""
+        with _pull_lock(skills_dir) as acquired:
+            if not acquired:
+                logger.info("[SkillHub] pull already running in another process, cycle skipped")
+                return {
+                    "downloaded": 0,
+                    "skipped": 0,
+                    "deleted": 0,
+                    "total_remote": 0,
+                    "restored_from_backup": False,
+                    "backup_dir": "",
+                    "locked_out": True,
+                }
+            return self._pull_skills_locked(
+                skills_dir,
+                mirror=mirror,
+                skip_names=skip_names,
+                include_names=include_names,
+            )
+
+    def _pull_skills_locked(
         self,
         skills_dir: str,
         mirror: bool = True,
@@ -694,6 +772,19 @@ class SkillHub:
                 backup_dir="",
             )
 
+        # Сверяем хэши до копирования: mirror-pull переписывает весь каталог (бэкап + staging)
+        # на каждом цикле поллера, а обычно менять нечего — 102 скилла копировались раз в 30 секунд.
+        if self._mirror_pull_is_noop(skills_dir, manifest, local_skills, local_dirs_by_name, skip_set):
+            logger.info("[SkillHub] pull complete: 0 downloaded, %d skipped, 0 deleted, %d total remote", len(manifest), len(manifest))
+            return _result(
+                downloaded=0,
+                skipped=len(manifest),
+                deleted=0,
+                total_remote=len(manifest),
+                restored_from_backup=False,
+                backup_dir="",
+            )
+
         parent_dir = os.path.dirname(os.path.abspath(skills_dir))
         base_name = os.path.basename(os.path.abspath(skills_dir))
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
@@ -756,7 +847,11 @@ class SkillHub:
             remote_names = set(manifest.keys())
             local_names = set(local_skills.keys())
             for stale in sorted(local_names - remote_names):
-                shutil.rmtree(local_skills[stale], ignore_errors=False)
+                stale_dir = local_skills[stale]
+                # каталог мог уйти вместе с родительским скиллом — это не повод откатывать весь pull
+                if not os.path.isdir(stale_dir):
+                    continue
+                shutil.rmtree(stale_dir, ignore_errors=True)
                 deleted += 1
 
             for name in sorted(remote_names):
@@ -778,9 +873,7 @@ class SkillHub:
         except Exception as e:
             logger.warning("[SkillHub] mirror pull failed, restoring backup: %s", e)
             try:
-                if os.path.isdir(skills_dir):
-                    shutil.rmtree(skills_dir)
-                shutil.copytree(backup_dir, skills_dir)
+                _restore_skills_dir(skills_dir, backup_dir, stamp)
                 restored_from_backup = True
                 logger.info("[SkillHub] local skills restored from backup: %s", backup_dir)
             except Exception as restore_err:

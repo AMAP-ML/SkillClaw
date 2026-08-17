@@ -386,9 +386,7 @@ class SkillManager:
             if self.embedding_type == "api":
                 # Use OpenAI-compatible API
                 if not self.embedding_api_url or not self.embedding_api_model:
-                    raise ValueError(
-                        "embedding_api_url and embedding_api_model must be set when embedding_type='api'"
-                    )
+                    raise ValueError("embedding_api_url and embedding_api_model must be set when embedding_type='api'")
                 from .embedding_api_client import EmbeddingAPIClient
 
                 logger.info(

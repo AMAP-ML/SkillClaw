@@ -4,11 +4,9 @@ Unit tests for embedding API client.
 Run with: pytest tests/test_embedding_api.py
 """
 
-import json
 import numpy as np
 import pytest
 import responses
-from unittest.mock import MagicMock, patch
 
 from skillclaw.embedding_api_client import EmbeddingAPIClient
 
@@ -99,7 +97,7 @@ class TestEmbeddingAPIClient:
             api_key="secret-key-123",
         )
 
-        embeddings = client.encode(["test"])
+        client.encode(["test"])
 
         # Check that request includes Authorization header
         assert len(responses.calls) == 1
@@ -121,7 +119,7 @@ class TestEmbeddingAPIClient:
             api_key=None,
         )
 
-        embeddings = client.encode(["test"])
+        client.encode(["test"])
 
         # Check that request does not include Authorization header
         assert len(responses.calls) == 1
@@ -200,8 +198,7 @@ class TestEmbeddingAPIClient:
 
         # Generate mock embeddings
         embeddings_data = [
-            {"embedding": list(np.random.rand(embedding_dim).astype(float)), "index": i}
-            for i in range(num_texts)
+            {"embedding": list(np.random.rand(embedding_dim).astype(float)), "index": i} for i in range(num_texts)
         ]
 
         responses.add(
@@ -229,13 +226,14 @@ class TestEmbeddingAPIIntegration:
     @pytest.mark.skipif(True, reason="Requires actual API key")
     def test_skill_manager_with_api(self):
         """Test SkillManager integration with embedding API.
-        
+
         This test is skipped by default as it requires a real API key.
         Set embedding API credentials and remove @skipif to run.
         """
-        from skillclaw.skill_manager import SkillManager
-        from pathlib import Path
         import tempfile
+        from pathlib import Path
+
+        from skillclaw.skill_manager import SkillManager
 
         # Create temporary skill directory
         with tempfile.TemporaryDirectory() as tmpdir:

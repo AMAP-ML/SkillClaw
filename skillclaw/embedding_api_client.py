@@ -10,9 +10,10 @@ Supports any embedding service with OpenAI API format, including:
 """
 
 import logging
+from typing import List, Optional
+
 import numpy as np
 import requests
-from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -67,9 +68,7 @@ class EmbeddingAPIClient:
             numpy array of shape (len(texts), embedding_dim)
         """
         if show_progress_bar:
-            logger.warning(
-                "show_progress_bar parameter is not supported for embedding API client and will be ignored"
-            )
+            logger.warning("show_progress_bar parameter is not supported for embedding API client and will be ignored")
 
         if not texts:
             return np.zeros((0, 0), dtype=np.float32)
@@ -132,9 +131,7 @@ class EmbeddingAPIClient:
             dtype=np.float32,
         )
 
-        logger.debug(
-            f"Retrieved {len(embeddings)} embeddings with dimension {embeddings.shape[1]}"
-        )
+        logger.debug(f"Retrieved {len(embeddings)} embeddings with dimension {embeddings.shape[1]}")
         return embeddings
 
     def __del__(self):

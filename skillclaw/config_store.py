@@ -39,6 +39,7 @@ def _resolve_config_file(config_file: Path | None = None) -> Path:
 
     return CONFIG_FILE
 
+
 _DEFAULTS: dict = {
     "llm": {
         "provider": "custom",

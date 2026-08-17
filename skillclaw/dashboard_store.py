@@ -11,7 +11,7 @@ from typing import Any
 
 
 def _json_dumps(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False)
+    return json.dumps(value, ensure_ascii=False, default=str)
 
 
 def _json_loads(raw: str | None, default: Any) -> Any:

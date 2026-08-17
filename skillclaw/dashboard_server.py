@@ -177,13 +177,18 @@ class DashboardService:
             raise ValueError("bundle snapshot is unavailable for the selected version")
         write_skill_bundle(skill_root, bundle_files, clean=True)
 
-    def _embedded_evolve_server(self):
+    def _embedded_evolve_server(self, *, status_only: bool = False):
         from evolve_server.core.config import EvolveServerConfig
         from evolve_server.engines.workflow import EvolveServer
 
         from .validation_store import ValidationStore
 
         evolve_config = EvolveServerConfig.from_skillclaw_config(self.config)
+        if status_only and not evolve_config.llm_api_key:
+            # Building the engine initializes the OpenAI client, even though a
+            # status read only touches storage. Supply a non-secret placeholder
+            # so dashboard health does not require upstream LLM credentials.
+            evolve_config.llm_api_key = "skillclaw-status-only"
         try:
             validation_store = ValidationStore.from_config(self.config)
             if validation_store.list_jobs():
@@ -458,7 +463,7 @@ class DashboardService:
             try:
                 from evolve_server.storage.oss_helpers import list_session_keys
 
-                server = self._embedded_evolve_server()
+                server = self._embedded_evolve_server(status_only=True)
                 pending_keys = await server._call_storage(list_session_keys, server._bucket, server._prefix)
                 entries = server._id_registry.all_entries()
                 return {

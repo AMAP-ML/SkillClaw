@@ -39,6 +39,10 @@ _PROVIDER_PRESETS = {
         "api_base": "https://openrouter.ai/api/v1",
         "model_id": "google/gemini-2.5-pro",
     },
+    "atlascloud": {
+        "api_base": "https://api.atlascloud.ai/v1",
+        "model_id": "deepseek-ai/DeepSeek-V3.1",
+    },
     "bedrock": {
         "api_base": "",
         "model_id": "us.anthropic.claude-sonnet-4-6",
@@ -47,6 +51,10 @@ _PROVIDER_PRESETS = {
         "api_base": "",
         "model_id": "",
     },
+}
+_PROVIDER_CHOICES = ["kimi", "qwen", "openai", "minimax", "novita", "openrouter", "atlascloud", "bedrock", "custom"]
+_PROVIDER_DEFAULT_API_MODE = {
+    "atlascloud": "chat",
 }
 
 
@@ -106,6 +114,10 @@ def _infer_existing_sharing_backend(current_sharing: dict) -> str:
     return "s3"
 
 
+def _default_llm_api_mode(provider: str, claw_type: str) -> str:
+    return _PROVIDER_DEFAULT_API_MODE.get(provider, default_llm_api_mode_for_claw(claw_type))
+
+
 class SetupWizard:
     """Interactive configuration wizard."""
 
@@ -135,9 +147,10 @@ class SetupWizard:
         current_provider = current_llm.get("provider", "custom")
         provider = _prompt_choice(
             "LLM provider",
-            ["kimi", "qwen", "openai", "minimax", "novita", "openrouter", "bedrock", "custom"],
+            _PROVIDER_CHOICES,
             default=current_provider,
         )
+        provider_unchanged = current_provider == provider
         preset = _PROVIDER_PRESETS[provider]
         openrouter_config: dict = existing.get("openrouter", {})
         if provider == "bedrock":
@@ -145,25 +158,25 @@ class SetupWizard:
             api_key = ""
             model_id = _prompt(
                 "Bedrock model ID (inference profile)",
-                default=current_llm.get("model_id") or preset["model_id"],
+                default=(current_llm.get("model_id") if provider_unchanged else "") or preset["model_id"],
             )
             bedrock_region = _prompt(
                 "AWS region",
-                default=current_llm.get("bedrock_region", "us-east-1"),
+                default=(current_llm.get("bedrock_region") if provider_unchanged else "") or "us-east-1",
             )
         else:
             bedrock_region = ""
             preset_regions = preset.get("regions") or {}
-            default_api_base = current_llm.get("api_base") or preset["api_base"]
+            default_api_base = (current_llm.get("api_base") if provider_unchanged else "") or preset["api_base"]
             if preset_regions:
                 region_choices = ["global_en", "cn_zh"]
-                default_region = str(current_llm.get("region") or "global_en")
+                default_region = str((current_llm.get("region") if provider_unchanged else "") or "global_en")
                 region = _prompt_choice(
                     "Region",
                     region_choices,
                     default=default_region if default_region in region_choices else "global_en",
                 )
-                default_api_base = current_llm.get("api_base") or preset_regions[region]
+                default_api_base = (current_llm.get("api_base") if provider_unchanged else "") or preset_regions[region]
             else:
                 region = ""
             api_base = _prompt(
@@ -172,11 +185,11 @@ class SetupWizard:
             )
             model_id = _prompt(
                 "Model ID",
-                default=current_llm.get("model_id") or preset["model_id"],
+                default=(current_llm.get("model_id") if provider_unchanged else "") or preset["model_id"],
             )
             api_key = _prompt(
                 "API key",
-                default=current_llm.get("api_key", ""),
+                default=current_llm.get("api_key", "") if provider_unchanged else "",
                 hide=True,
             )
 
@@ -378,8 +391,11 @@ class SetupWizard:
         proxy_config["port"] = proxy_port
         proxy_config.setdefault("host", "0.0.0.0")
         proxy_config["served_model_name"] = served_model_name or "skillclaw-model"
-        default_api_mode = default_llm_api_mode_for_claw(claw_type)
-        llm_api_mode = str(current_llm.get("api_mode", default_api_mode) or default_api_mode)
+        default_api_mode = _default_llm_api_mode(provider, claw_type)
+        if provider_unchanged:
+            llm_api_mode = str(current_llm.get("api_mode", default_api_mode) or default_api_mode)
+        else:
+            llm_api_mode = default_api_mode
         data = {
             "claw_type": claw_type,
             "llm": {

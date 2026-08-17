@@ -210,6 +210,8 @@ skillclaw setup
 
 The setup wizard prompts for the provider, model, local skills directory, PRM settings, optional CLI agent integration, and optional shared storage.
 
+If you use Atlas Cloud as the upstream OpenAI-compatible provider, choose `atlascloud`, keep the default API base `https://api.atlascloud.ai/v1`, and enter your Atlas Cloud API key when prompted. The preset uses chat-compatible forwarding so Codex clients can use SkillClaw's Responses-to-chat bridge.
+
 For a minimal first run:
 
 - choose `none` for the CLI agent if you do not want SkillClaw to auto-configure an external agent yet

@@ -3079,7 +3079,7 @@ class SkillClawAPIServer:
 
             content = json.dumps(session_payload, ensure_ascii=False)
             oss_key = f"{hub._prefix()}sessions/{session_id}.json"
-            hub._bucket.put_object(oss_key, content.encode("utf-8"))
+            await asyncio.to_thread(hub._bucket.put_object, oss_key, content.encode("utf-8"))
             logger.info(
                 "[SkillHub] session uploaded: %s (%d turns, %d bytes)",
                 oss_key,
@@ -3153,7 +3153,11 @@ class SkillClawAPIServer:
             from .skill_hub import SkillHub
 
             hub = SkillHub.from_config(self.config)
-            pull_result = hub.pull_skills(self.config.skills_dir, skip_names=skip_names)
+            pull_result = await asyncio.to_thread(
+                hub.pull_skills,
+                self.config.skills_dir,
+                skip_names=skip_names,
+            )
             logger.info(
                 "[SkillHub] skill pull: %d downloaded, %d unchanged, %d failed, %d deleted, %d total remote",
                 pull_result["downloaded"],

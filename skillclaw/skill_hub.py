@@ -32,6 +32,7 @@ from .skill_bundle import (
     bundle_file_records,
     bundle_has_only_entrypoint,
     bundle_tree_sha256,
+    normalize_skill_path_segment,
     read_skill_bundle_with_meta,
     write_skill_bundle,
 )
@@ -44,6 +45,8 @@ def _is_hermes_skill_root(skills_dir: str) -> bool:
 
 
 def _skill_dir_for_root(skills_dir: str, skill_name: str, category: str = "general") -> str:
+    skill_name = normalize_skill_path_segment(skill_name, "skill name")
+    category = normalize_skill_path_segment(category or "general", "skill category")
     if _is_hermes_skill_root(skills_dir) and category and category != "general":
         return os.path.join(skills_dir, category, skill_name)
     return os.path.join(skills_dir, skill_name)

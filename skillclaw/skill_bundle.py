@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Iterable, Mapping
 
 _BUNDLE_ENTRYPOINT = "SKILL.md"
@@ -30,12 +30,32 @@ def normalize_bundle_rel_path(rel_path: str) -> str:
     value = str(rel_path or "").strip().replace("\\", "/")
     if not value:
         raise SkillBundleError("Bundle path must not be empty")
-    parts = PurePosixPath(value).parts
+    posix_path = PurePosixPath(value)
+    windows_path = PureWindowsPath(value)
+    if posix_path.is_absolute() or windows_path.is_absolute() or windows_path.drive:
+        raise SkillBundleError(f"Bundle path must be relative: {rel_path!r}")
+    parts = posix_path.parts
     if not parts:
         raise SkillBundleError("Bundle path must not be empty")
     if any(part in {"", ".", ".."} for part in parts):
         raise SkillBundleError(f"Unsafe bundle path: {rel_path!r}")
     return "/".join(parts)
+
+
+def normalize_skill_path_segment(value: str, field: str) -> str:
+    """Validate a remote name/category before using it as one directory segment."""
+    segment = str(value or "").strip()
+    normalized = segment.replace("\\", "/")
+    windows_path = PureWindowsPath(normalized)
+    if (
+        not segment
+        or "\x00" in segment
+        or windows_path.drive
+        or len(PurePosixPath(normalized).parts) != 1
+        or segment in {".", ".."}
+    ):
+        raise SkillBundleError(f"Unsafe {field}: {value!r}")
+    return segment
 
 
 def is_ignored_bundle_rel_path(rel_path: str) -> bool:
@@ -146,12 +166,21 @@ def write_skill_bundle(
     clean: bool = False,
 ) -> None:
     root = Path(skill_dir)
+    root_resolved = root.resolve(strict=False)
+    planned_writes: list[tuple[Path, bytes]] = []
+    for rel_path, data in sorted(coerce_skill_bundle(bundle_files).items()):
+        path = root / Path(rel_path)
+        try:
+            path.resolve(strict=False).relative_to(root_resolved)
+        except ValueError as exc:
+            raise SkillBundleError(f"Bundle path escapes skill directory: {rel_path!r}") from exc
+        planned_writes.append((path, data))
+
     if clean and root.exists():
         shutil.rmtree(root)
     root.mkdir(parents=True, exist_ok=True)
 
-    for rel_path, data in sorted(coerce_skill_bundle(bundle_files).items()):
-        path = root / Path(rel_path)
+    for path, data in planned_writes:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
 

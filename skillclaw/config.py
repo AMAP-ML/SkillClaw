@@ -32,7 +32,13 @@ class SkillClawConfig:
     skills_dir: str = "memory_data/skills"
     skills_public_root: str = ""
     retrieval_mode: str = "template"
+    # Embedding configuration: "local" for SentenceTransformer, "api" for OpenAI-compatible APIs
+    embedding_type: str = "local"
     embedding_model_path: str = "Qwen/Qwen3-Embedding-0.6B"
+    # OpenAI-compatible embedding API configuration
+    embedding_api_url: str = ""  # e.g., "https://api.openai.com/v1" or "https://api.jina.ai/v1"
+    embedding_api_model: str = ""  # e.g., "text-embedding-3-small" or "jina-embeddings-v5-text-small"
+    embedding_api_key: str = ""
     skill_top_k: int = 6
     max_skills_prompt_chars: int = 30000
 
@@ -65,6 +71,9 @@ class SkillClawConfig:
     # Upstream API surface: "chat" keeps the legacy chat-completions bridge;
     # "responses" forwards Codex /v1/responses payloads to an upstream Responses API.
     llm_api_mode: str = "chat"
+    # Optional provider region tag (e.g. "global_en" / "cn_zh") for providers that
+    # expose region-specific endpoints; otherwise empty.
+    llm_region: str = ""
 
     # ------------------------------------------------------------------ #
     # OpenRouter-specific (ignored for other providers)                    #

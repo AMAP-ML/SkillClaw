@@ -25,7 +25,11 @@ _PROVIDER_PRESETS = {
     },
     "minimax": {
         "api_base": "https://api.minimax.io/v1",
-        "model_id": "MiniMax-M2.7",
+        "model_id": "MiniMax-M3",
+        "regions": {
+            "global_en": "https://api.minimax.io/v1",
+            "cn_zh": "https://api.minimaxi.com/v1",
+        },
     },
     "novita": {
         "api_base": "https://api.novita.ai/openai",
@@ -162,9 +166,22 @@ class SetupWizard:
             )
         else:
             bedrock_region = ""
+            preset_regions = preset.get("regions") or {}
+            default_api_base = (current_llm.get("api_base") if provider_unchanged else "") or preset["api_base"]
+            if preset_regions:
+                region_choices = ["global_en", "cn_zh"]
+                default_region = str((current_llm.get("region") if provider_unchanged else "") or "global_en")
+                region = _prompt_choice(
+                    "Region",
+                    region_choices,
+                    default=default_region if default_region in region_choices else "global_en",
+                )
+                default_api_base = (current_llm.get("api_base") if provider_unchanged else "") or preset_regions[region]
+            else:
+                region = ""
             api_base = _prompt(
                 "API base URL [http://api.example.com/v1]",
-                default=(current_llm.get("api_base") if provider_unchanged else "") or preset["api_base"],
+                default=default_api_base,
             )
             model_id = _prompt(
                 "Model ID",
@@ -388,6 +405,7 @@ class SetupWizard:
                 "api_key": api_key,
                 "bedrock_region": bedrock_region,
                 "api_mode": llm_api_mode,
+                "region": region,
             },
             "openrouter": openrouter_config,
             "proxy": proxy_config,

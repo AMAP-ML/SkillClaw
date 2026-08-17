@@ -3188,7 +3188,8 @@ class SkillClawAPIServer:
         def _prompt_len(msgs):
             return _estimate_openai_body_input_tokens({"messages": msgs, "tools": tools})
 
-        if _prompt_len(messages) <= max_prompt_tokens:
+        original_tokens = _prompt_len(messages)
+        if original_tokens <= max_prompt_tokens:
             return messages
 
         # Split into system and non-system messages
@@ -3196,20 +3197,27 @@ class SkillClawAPIServer:
         non_sys = [m for m in messages if m.get("role") != "system"]
 
         dropped = 0
-        while len(non_sys) > 1:
-            candidate = sys_msgs + non_sys[dropped + 1 :]
-            if _prompt_len(candidate) <= max_prompt_tokens:
-                dropped += 1
-                break
+        while len(non_sys) - dropped > 1:
             dropped += 1
+            candidate = sys_msgs + non_sys[dropped:]
+            if _prompt_len(candidate) <= max_prompt_tokens:
+                break
 
         result = sys_msgs + non_sys[dropped:]
+        result_tokens = _prompt_len(result)
         if dropped:
             logger.info(
                 "[OpenClaw] context truncated: dropped %d oldest messages (%d -> %d est tokens, limit=%d)",
                 dropped,
-                _prompt_len(messages),
-                _prompt_len(result),
+                original_tokens,
+                result_tokens,
+                max_prompt_tokens,
+            )
+        if result_tokens > max_prompt_tokens:
+            logger.warning(
+                "[OpenClaw] context remains over limit after preserving system messages and the newest message "
+                "(%d est tokens, limit=%d)",
+                result_tokens,
                 max_prompt_tokens,
             )
         return result

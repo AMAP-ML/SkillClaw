@@ -42,6 +42,25 @@ logger = logging.getLogger(__name__)
 _LEGACY_SKILLCLAW_SKILLS_DIR = Path.home() / ".skillclaw" / "skills"
 _HERMES_HOME = Path.home() / ".hermes"
 _HERMES_SKILLS_DIR = _HERMES_HOME / "skills"
+
+
+def _get_hermes_config_path() -> Path:
+    """Resolve Hermes config path, honoring HERMES_CONFIG or HERMES_HOME env vars."""
+    env_config = os.environ.get("HERMES_CONFIG", "").strip()
+    if env_config:
+        return Path(env_config).expanduser()
+    env_home = os.environ.get("HERMES_HOME", "").strip()
+    if env_home:
+        return Path(env_home).expanduser() / "config.yaml"
+    return _HERMES_HOME / "config.yaml"
+
+
+def _get_hermes_skills_dir() -> Path:
+    """Resolve Hermes skills dir, honoring HERMES_HOME env var."""
+    env_home = os.environ.get("HERMES_HOME", "").strip()
+    if env_home:
+        return Path(env_home).expanduser() / "skills"
+    return _HERMES_SKILLS_DIR
 _HERMES_BACKUP_DIR = Path.home() / ".skillclaw" / "backups" / "hermes"
 _CODEX_HOME = Path.home() / ".codex"
 _CODEX_CONFIG_PATH = _CODEX_HOME / "config.toml"
@@ -471,7 +490,7 @@ def _write_json_mapping_atomic(path: Path, data: dict, label: str) -> None:
 
 def _configure_hermes(cfg: "SkillClawConfig") -> None:
     """Auto-configure Hermes to route model traffic through SkillClaw."""
-    config_path = _HERMES_HOME / "config.yaml"
+    config_path = _get_hermes_config_path()
     model_id = cfg.served_model_name or cfg.llm_model_id or "skillclaw-model"
     api_key = cfg.proxy_api_key or "skillclaw"
     base_url = f"http://127.0.0.1:{cfg.proxy_port}/v1"
@@ -496,7 +515,7 @@ def _configure_hermes(cfg: "SkillClawConfig") -> None:
 
 def inspect_hermes_config(cfg: "SkillClawConfig") -> dict[str, object]:
     """Return a diagnostic snapshot of the local Hermes integration state."""
-    config_path = _HERMES_HOME / "config.yaml"
+    config_path = _get_hermes_config_path()
     expected_model = cfg.served_model_name or cfg.llm_model_id or "skillclaw-model"
     expected_base_url = f"http://127.0.0.1:{cfg.proxy_port}/v1"
     expected_api_key = cfg.proxy_api_key or "skillclaw"
@@ -572,13 +591,13 @@ def inspect_hermes_config(cfg: "SkillClawConfig") -> dict[str, object]:
 
 
 def restore_hermes_config(backup_path: Path | None = None) -> dict[str, str]:
-    """Restore ~/.hermes/config.yaml from the latest or a specified backup."""
+    """Restore Hermes config from the latest or a specified backup."""
     source = Path(backup_path).expanduser() if backup_path is not None else _latest_hermes_backup_path()
     if source is None or not source.exists():
         raise FileNotFoundError("No Hermes backup found")
 
     text = source.read_text(encoding="utf-8")
-    target = _HERMES_HOME / "config.yaml"
+    target = _get_hermes_config_path()
     _write_text_atomic(target, text, "Hermes config restore")
     return {"source": str(source), "target": str(target)}
 

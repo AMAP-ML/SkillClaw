@@ -40,7 +40,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 _LEGACY_SKILLCLAW_SKILLS_DIR = Path.home() / ".skillclaw" / "skills"
-_HERMES_HOME = Path.home() / ".hermes"
+from ._paths import resolve_hermes_home
+
+_HERMES_HOME = resolve_hermes_home()
 _HERMES_SKILLS_DIR = _HERMES_HOME / "skills"
 _HERMES_BACKUP_DIR = Path.home() / ".skillclaw" / "backups" / "hermes"
 _CODEX_HOME = Path.home() / ".codex"
@@ -530,10 +532,10 @@ def inspect_hermes_config(cfg: "SkillClawConfig") -> dict[str, object]:
     next_steps: list[str] = []
 
     if not config_path.exists():
-        issues.append("Hermes config is missing: ~/.hermes/config.yaml")
+        issues.append(f"Hermes config is missing: {config_path}")
     if not proxy_match:
         issues.append("Hermes model routing is not pointing at the local SkillClaw proxy.")
-        next_steps.append("Start SkillClaw once so it can rewrite ~/.hermes/config.yaml.")
+        next_steps.append(f"Start SkillClaw once so it can rewrite {config_path}.")
     if not expected_skills_dir.is_dir():
         issues.append(f"Hermes skills directory is missing: {expected_skills_dir}")
         next_steps.append(f"Create or prepare the Hermes skills directory: {expected_skills_dir}")
@@ -572,7 +574,7 @@ def inspect_hermes_config(cfg: "SkillClawConfig") -> dict[str, object]:
 
 
 def restore_hermes_config(backup_path: Path | None = None) -> dict[str, str]:
-    """Restore ~/.hermes/config.yaml from the latest or a specified backup."""
+    """Restore the Hermes config from the latest or a specified backup."""
     source = Path(backup_path).expanduser() if backup_path is not None else _latest_hermes_backup_path()
     if source is None or not source.exists():
         raise FileNotFoundError("No Hermes backup found")

@@ -1495,9 +1495,9 @@ class SkillClawAPIServer:
             os.makedirs(config.record_dir, exist_ok=True)
             self._record_file = os.path.join(config.record_dir, "conversations.jsonl")
             self._prm_record_file = os.path.join(config.record_dir, "prm_scores.jsonl")
-            with open(self._record_file, "w"):
+            with open(self._record_file, "a"):
                 pass
-            with open(self._prm_record_file, "w"):
+            with open(self._prm_record_file, "a"):
                 pass
 
         self.app = self._build_app()

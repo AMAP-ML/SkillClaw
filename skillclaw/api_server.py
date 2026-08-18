@@ -47,7 +47,13 @@ _NON_STANDARD_BODY_KEYS = {
     "session_done",
     "turn_type",
     "_skillclaw_protocol",
+    # Hermes may send this for reasoning-capable providers. SkillClaw exposes a
+    # generic OpenAI-compatible proxy alias, and non-reasoning upstream chat
+    # models such as gpt-4o reject this extension with HTTP 400. Strip it at
+    # the proxy boundary instead of forwarding it blindly.
+    "reasoning_effort",
 }
+_OPENAI_COMPAT_MAX_COMPLETION_TOKENS = 8192
 _PROTOCOL_ANTHROPIC_MESSAGES = "anthropic_messages"
 _PROTOCOL_RESPONSES_COMPAT = "responses_compat"
 
@@ -64,6 +70,43 @@ def _flatten_message_content(content) -> str:
         parts = [item.get("text", "") for item in content if isinstance(item, dict) and item.get("type") == "text"]
         return " ".join(parts) if parts else ""
     return str(content) if content is not None else ""
+
+
+def _cap_completion_token_fields(body: dict[str, Any]) -> None:
+    """Clamp oversized completion-token requests before forwarding upstream.
+
+    Hermes can ask custom OpenAI-compatible routes for very large completions
+    (for example 65536 tokens). Several upstream chat-completions models reject
+    those requests immediately, and SkillClaw's retry loop makes that look like
+    a hung smoke test. Keep the proxy request within a conservative
+    OpenAI-compatible ceiling.
+    """
+    for key in ("max_tokens", "max_completion_tokens"):
+        value = body.get(key)
+        if value is None:
+            continue
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            continue
+        if parsed > _OPENAI_COMPAT_MAX_COMPLETION_TOKENS:
+            body[key] = _OPENAI_COMPAT_MAX_COMPLETION_TOKENS
+
+
+def _openai_chat_requires_max_completion_tokens(model: str) -> bool:
+    """Return True for OpenAI chat models that reject legacy max_tokens."""
+    model = str(model or "").lower()
+    return model.startswith(("gpt-5", "o1", "o3", "o4"))
+
+
+def _normalize_openai_chat_token_fields(body: dict[str, Any]) -> None:
+    """Translate legacy max_tokens for newer OpenAI chat-completions models."""
+    if not _openai_chat_requires_max_completion_tokens(str(body.get("model") or "")):
+        return
+    if "max_tokens" in body and "max_completion_tokens" not in body:
+        body["max_completion_tokens"] = body.pop("max_tokens")
+    else:
+        body.pop("max_tokens", None)
 
 
 def _normalize_assistant_content_parts(content: list[dict]) -> tuple[str, list[dict]]:
@@ -2395,6 +2438,7 @@ class SkillClawAPIServer:
             messages = self._truncate_messages(messages, tools, max_prompt)
 
         forward_body = {k: v for k, v in body.items() if k not in _NON_STANDARD_BODY_KEYS}
+        _cap_completion_token_fields(forward_body)
         forward_body["stream"] = False
         forward_body.pop("stream_options", None)
         if "model" not in forward_body:
@@ -2578,6 +2622,7 @@ class SkillClawAPIServer:
             )
 
         send_body = {k: v for k, v in body.items() if k not in _NON_STANDARD_BODY_KEYS}
+        _cap_completion_token_fields(send_body)
         send_body["model"] = self.config.llm_model_id or body.get("model", "")
         send_body["stream"] = stream
 
@@ -2882,6 +2927,7 @@ class SkillClawAPIServer:
         # Strip Tinker-specific fields not supported by standard OpenAI APIs
         send_body = {k: v for k, v in body.items() if k not in {"logprobs", "top_logprobs", "stream_options"}}
         send_body["model"] = self.config.llm_model_id or body.get("model", "")
+        _normalize_openai_chat_token_fields(send_body)
         send_body["stream"] = False
 
         headers: dict[str, str] = {}

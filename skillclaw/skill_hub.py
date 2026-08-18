@@ -41,7 +41,27 @@ logger = logging.getLogger(__name__)
 
 
 def _is_hermes_skill_root(skills_dir: str) -> bool:
-    return os.path.realpath(skills_dir) == os.path.realpath(os.path.join(os.path.expanduser("~"), ".hermes", "skills"))
+    skills = os.path.realpath(skills_dir)
+    # Match any .hermes/skills or .hermes/profiles/*/skills path
+    parts = skills.split(os.sep)
+    try:
+        hermes_idx = parts.index(".hermes")
+    except ValueError:
+        return False
+    if hermes_idx + 2 > len(parts):
+        return False
+    # .hermes/skills
+    if parts[hermes_idx + 1] == "skills" and hermes_idx + 2 == len(parts):
+        return True
+    # .hermes/profiles/<name>/skills
+    if (
+        hermes_idx + 4 <= len(parts)
+        and parts[hermes_idx + 1] == "profiles"
+        and parts[hermes_idx + 3] == "skills"
+        and hermes_idx + 4 == len(parts)
+    ):
+        return True
+    return False
 
 
 def _skill_dir_for_root(skills_dir: str, skill_name: str, category: str = "general") -> str:

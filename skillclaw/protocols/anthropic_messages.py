@@ -537,7 +537,7 @@ async def stream_from_openai_result(
         {
             "type": "message_delta",
             "delta": {"stop_reason": stop_reason, "stop_sequence": None},
-            "usage": {"output_tokens": anthropic_usage.get("output_tokens", 0)},
+            "usage": {**anthropic_usage},
         },
     )
     yield sse("message_stop", {"type": "message_stop"})

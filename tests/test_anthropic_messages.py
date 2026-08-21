@@ -518,6 +518,30 @@ def test_streaming_openai_tool_calls_use_tool_use_stop_reason_even_if_finish_rea
     )
 
 
+def test_streaming_final_message_delta_usage_includes_input_and_output_tokens():
+    import asyncio
+    import json
+
+    result = {
+        "response": {
+            "id": "chatcmpl_1",
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": "ok"},
+                }
+            ],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 2},
+        }
+    }
+
+    events = asyncio.run(_collect_stream_events(result, "claude-code-test"))
+    parsed = [(name, json.loads(data)) for name, data in events]
+
+    message_delta = next(payload for name, payload in parsed if name == "message_delta")
+    assert message_delta["usage"] == {"input_tokens": 10, "output_tokens": 2}
+
+
 def test_anthropic_system_blocks_preserve_text_and_cache_control():
     body = {
         "model": "claude-code-test",

@@ -64,6 +64,10 @@ class SkillClawConfig:
     # ------------------------------------------------------------------ #
     # LLM forwarding                                                      #
     # ------------------------------------------------------------------ #
+    # ``"codex_oauth"`` authenticates with the ChatGPT-account OAuth token that
+    # Hermes / the Codex CLI already maintain on disk instead of a static API
+    # key, so a ChatGPT Plus/Pro subscription can be used without provisioning
+    # separate pay-per-token API billing. See skillclaw/codex_oauth.py.
     llm_provider: str = "openai"
     llm_api_base: str = ""
     llm_api_key: str = ""

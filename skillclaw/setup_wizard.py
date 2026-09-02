@@ -43,6 +43,10 @@ _PROVIDER_PRESETS = {
         "api_base": "https://api.atlascloud.ai/v1",
         "model_id": "deepseek-ai/DeepSeek-V3.1",
     },
+    "codex_oauth": {
+        "api_base": "https://chatgpt.com/backend-api/codex",
+        "model_id": "gpt-5.6-terra",
+    },
     "bedrock": {
         "api_base": "",
         "model_id": "us.anthropic.claude-sonnet-4-6",
@@ -52,9 +56,22 @@ _PROVIDER_PRESETS = {
         "model_id": "",
     },
 }
-_PROVIDER_CHOICES = ["kimi", "qwen", "openai", "minimax", "novita", "openrouter", "atlascloud", "bedrock", "custom"]
+_PROVIDER_CHOICES = [
+    "kimi",
+    "qwen",
+    "openai",
+    "minimax",
+    "novita",
+    "openrouter",
+    "atlascloud",
+    "codex_oauth",
+    "bedrock",
+    "custom",
+]
 _PROVIDER_DEFAULT_API_MODE = {
     "atlascloud": "chat",
+    # The Codex backend speaks the Responses API, not chat-completions.
+    "codex_oauth": "responses",
 }
 
 
@@ -187,11 +204,22 @@ class SetupWizard:
                 "Model ID",
                 default=(current_llm.get("model_id") if provider_unchanged else "") or preset["model_id"],
             )
-            api_key = _prompt(
-                "API key",
-                default=current_llm.get("api_key", "") if provider_unchanged else "",
-                hide=True,
-            )
+            if provider == "codex_oauth":
+                # Auth comes from the on-disk ChatGPT OAuth token maintained by
+                # Hermes / the Codex CLI, so there is no static key to collect.
+                api_key = ""
+                print(
+                    "\nUsing ChatGPT-account OAuth credentials from\n"
+                    "  ~/.hermes/auth.json  (or ~/.codex/auth.json)\n"
+                    "No API key needed — your ChatGPT subscription is used, not pay-per-token API billing.\n"
+                    "Log in first with `hermes auth` (or run `codex`) if you have not already."
+                )
+            else:
+                api_key = _prompt(
+                    "API key",
+                    default=current_llm.get("api_key", "") if provider_unchanged else "",
+                    hide=True,
+                )
 
         # OpenRouter-specific options
         if provider == "openrouter":

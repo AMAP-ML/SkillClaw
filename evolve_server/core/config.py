@@ -289,8 +289,21 @@ class EvolveServerConfig:
             or ""
         )
         local_root = str(getattr(config, "sharing_local_root", "") or os.environ.get("EVOLVE_LOCAL_ROOT", ""))
-        llm_api_key = config.llm_api_key or config.prm_api_key
-        llm_base_url = config.llm_api_base or config.prm_url
+        # Default to SkillClaw's own upstream, but let the environment override.
+        # This matters when SkillClaw authenticates via ``codex_oauth``: the
+        # inherited api_key is empty (auth is an on-disk OAuth token, not a
+        # static key), so the evolve server must instead be pointed at the
+        # SkillClaw proxy, which performs the OAuth handshake on its behalf.
+        llm_api_key = _first_env(
+            "EVOLVE_LLM_API_KEY",
+            "OPENAI_API_KEY",
+            default=config.llm_api_key or config.prm_api_key,
+        )
+        llm_base_url = _first_env(
+            "EVOLVE_LLM_BASE_URL",
+            "OPENAI_BASE_URL",
+            default=config.llm_api_base or config.prm_url,
+        )
         llm_model = os.environ.get("EVOLVE_MODEL", config.llm_model_id or "gpt-4o")
         llm_api_type = os.environ.get("EVOLVE_LLM_API_TYPE", "openai-completions")
 

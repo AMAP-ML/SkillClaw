@@ -2559,6 +2559,34 @@ class SkillClawAPIServer:
         """Return whether /v1/responses should be forwarded as Responses API."""
         return str(getattr(self.config, "llm_api_mode", "chat") or "chat").lower() == "responses"
 
+    def _codex_oauth_enabled(self) -> bool:
+        """Return whether upstream auth should use ChatGPT-account OAuth."""
+        return str(getattr(self.config, "llm_provider", "") or "").strip().lower() == "codex_oauth"
+
+    def _build_upstream_auth_headers(self, api_base: str) -> dict[str, str]:
+        """Build upstream auth headers for the configured provider.
+
+        For ``codex_oauth`` this resolves a live ChatGPT-account OAuth token
+        (refreshing it only when actually expired) plus the harness-identity
+        headers OpenAI's Codex endpoint requires.  Every other provider keeps
+        the historical static-API-key behavior.
+        """
+        if not self._codex_oauth_enabled():
+            if self.config.llm_api_key:
+                return {"Authorization": f"Bearer {self.config.llm_api_key}"}
+            return {}
+
+        from . import codex_oauth
+
+        try:
+            return codex_oauth.build_auth_headers(api_base)
+        except codex_oauth.CodexAuthError as e:
+            detail = f"Codex OAuth auth failed: {e}"
+            if getattr(e, "relogin_required", False):
+                detail += " — run `hermes auth` (or `codex`) to re-authenticate."
+            logger.error("[CodexOAuth] %s", detail)
+            raise HTTPException(status_code=401, detail=detail) from e
+
     def _prepare_responses_forward(
         self,
         body: dict[str, Any],
@@ -2581,9 +2609,7 @@ class SkillClawAPIServer:
         send_body["model"] = self.config.llm_model_id or body.get("model", "")
         send_body["stream"] = stream
 
-        headers: dict[str, str] = {}
-        if self.config.llm_api_key:
-            headers["Authorization"] = f"Bearer {self.config.llm_api_key}"
+        headers = self._build_upstream_auth_headers(api_base)
         return f"{api_base}/responses", send_body, headers
 
     def _prepare_native_responses_body(self, body: dict[str, Any], *, turn_type: str) -> dict[str, Any]:
@@ -2868,6 +2894,142 @@ class SkillClawAPIServer:
             logger.error("[OpenClaw] Responses stream failed: %s", e, exc_info=True)
             raise HTTPException(status_code=502, detail=f"Responses stream error: {e}") from e
 
+    def _chat_body_to_responses(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Translate an OpenAI chat-completions body into a Responses body.
+
+        Used when a chat-only client (e.g. the evolve server's ``AsyncLLMClient``)
+        talks to a proxy whose upstream exposes ONLY ``/responses`` -- notably the
+        Codex backend under ``codex_oauth``.  System/developer messages become
+        ``instructions``; the remaining turns become typed ``input`` items.
+        """
+        instructions: list[str] = []
+        input_items: list[dict[str, Any]] = []
+
+        for message in body.get("messages") or []:
+            if not isinstance(message, dict):
+                continue
+            role = str(message.get("role") or "user")
+            content = message.get("content")
+            if isinstance(content, list):
+                text = "".join(
+                    str(part.get("text") or "")
+                    for part in content
+                    if isinstance(part, dict) and part.get("type") in {"text", "input_text", "output_text"}
+                )
+            else:
+                text = str(content or "")
+            if not text:
+                continue
+            if role in {"system", "developer"}:
+                instructions.append(text)
+                continue
+            # Responses uses input_text for user turns and output_text for
+            # assistant turns; mixing them up is a 400 from the backend.
+            part_type = "output_text" if role == "assistant" else "input_text"
+            input_items.append({"type": "message", "role": role, "content": [{"type": part_type, "text": text}]})
+
+        send_body: dict[str, Any] = {
+            "model": self.config.llm_model_id or body.get("model", ""),
+            "input": input_items,
+            "stream": False,
+            "store": False,
+        }
+        if instructions:
+            send_body["instructions"] = "\n\n".join(instructions)
+        # NOTE: deliberately no max_output_tokens / temperature passthrough.
+        # The Codex backend rejects both ("Unsupported parameter"), and chat
+        # clients routinely set them, so silently dropping is the only way the
+        # bridge stays usable.
+        return send_body
+
+    @staticmethod
+    def _responses_payload_to_chat(payload: dict[str, Any], model: str) -> dict[str, Any]:
+        """Render a Responses payload in chat-completions shape for chat clients."""
+        text_parts: list[str] = []
+        for item in payload.get("output") or []:
+            if not isinstance(item, dict) or item.get("type") != "message":
+                continue
+            for part in item.get("content") or []:
+                if isinstance(part, dict) and part.get("type") == "output_text":
+                    text_parts.append(str(part.get("text") or ""))
+        usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
+        return {
+            "id": payload.get("id", "chatcmpl-skillclaw"),
+            "object": "chat.completion",
+            "created": payload.get("created_at", 0),
+            "model": payload.get("model", model),
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "".join(text_parts)},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": usage.get("input_tokens", 0),
+                "completion_tokens": usage.get("output_tokens", 0),
+                "total_tokens": usage.get("total_tokens", 0),
+            },
+        }
+
+    async def _forward_chat_via_responses(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Serve a chat-completions request from a Responses-only upstream.
+
+        The Codex backend rejects non-streaming Responses calls outright
+        ("Stream must be set to true"), so the bridge always streams and
+        aggregates the SSE events back into a single chat-shaped payload.
+        """
+        import httpx
+
+        api_base = self.config.llm_api_base.rstrip("/")
+        send_body = self._chat_body_to_responses(body)
+        send_body["stream"] = True
+        headers = self._build_upstream_auth_headers(api_base)
+
+        final_payload: dict[str, Any] = {}
+        text_parts: list[str] = []
+        try:
+            async with httpx.AsyncClient(timeout=_llm_request_timeout_seconds()) as client:
+                async with client.stream("POST", f"{api_base}/responses", json=send_body, headers=headers) as resp:
+                    if resp.status_code >= 400:
+                        # Must be read inside the stream context; the body is
+                        # otherwise unavailable once the response closes.
+                        detail = (await resp.aread()).decode("utf-8", "ignore")[:300]
+                        logger.error("[SkillClaw] chat→responses bridge error: %s %s", resp.status_code, detail)
+                        raise HTTPException(
+                            status_code=502, detail=f"Upstream Responses error {resp.status_code}: {detail}"
+                        )
+                    async for line in resp.aiter_lines():
+                        stripped = line.strip()
+                        if not stripped.startswith("data: "):
+                            continue
+                        raw = stripped[6:]
+                        if raw == "[DONE]":
+                            break
+                        try:
+                            event = json.loads(raw)
+                        except Exception:
+                            continue
+                        etype = event.get("type")
+                        if etype == "response.output_text.delta":
+                            text_parts.append(str(event.get("delta") or ""))
+                        elif etype == "response.completed":
+                            candidate = event.get("response")
+                            if isinstance(candidate, dict):
+                                final_payload = candidate
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error("[SkillClaw] chat→responses bridge failed: %s", e, exc_info=True)
+            raise HTTPException(status_code=502, detail=f"Responses bridge error: {e}") from e
+
+        chat = self._responses_payload_to_chat(final_payload, send_body.get("model", ""))
+        # Prefer the streamed deltas: response.completed occasionally omits the
+        # assembled output, which would otherwise yield an empty message.
+        if not chat["choices"][0]["message"]["content"] and text_parts:
+            chat["choices"][0]["message"]["content"] = "".join(text_parts)
+        return chat
+
     async def _forward_to_llm_openai(self, body: dict[str, Any]) -> dict[str, Any]:
         """Forward to an OpenAI-compatible API."""
         import httpx
@@ -2879,14 +3041,18 @@ class SkillClawAPIServer:
                 detail="llm_api_base is not configured. Run 'skillclaw setup' first.",
             )
 
+        # A Responses-only upstream (the Codex backend) has no
+        # /chat/completions route, so chat-shaped callers must be bridged
+        # rather than forwarded verbatim into a guaranteed 404.
+        if self._responses_native_enabled():
+            return await self._forward_chat_via_responses(body)
+
         # Strip Tinker-specific fields not supported by standard OpenAI APIs
         send_body = {k: v for k, v in body.items() if k not in {"logprobs", "top_logprobs", "stream_options"}}
         send_body["model"] = self.config.llm_model_id or body.get("model", "")
         send_body["stream"] = False
 
-        headers: dict[str, str] = {}
-        if self.config.llm_api_key:
-            headers["Authorization"] = f"Bearer {self.config.llm_api_key}"
+        headers = self._build_upstream_auth_headers(api_base)
 
         # OpenRouter-specific headers and body extensions
         if self.config.llm_provider == "openrouter":

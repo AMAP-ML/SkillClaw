@@ -42,6 +42,11 @@ logger = logging.getLogger(__name__)
 _LEGACY_SKILLCLAW_SKILLS_DIR = Path.home() / ".skillclaw" / "skills"
 _HERMES_HOME = Path.home() / ".hermes"
 _HERMES_SKILLS_DIR = _HERMES_HOME / "skills"
+# Named provider entry registered in Hermes' ``providers:`` map when SkillClaw
+# forwards to a Responses-only upstream. Hermes honours a NAMED provider's
+# transport verbatim, whereas a bare ``provider: custom`` has its
+# ``codex_responses`` mode stripped for non-OpenAI hosts.
+_HERMES_PROVIDER_NAME = "skillclaw"
 _HERMES_BACKUP_DIR = Path.home() / ".skillclaw" / "backups" / "hermes"
 _CODEX_HOME = Path.home() / ".codex"
 _CODEX_CONFIG_PATH = _CODEX_HOME / "config.toml"
@@ -482,12 +487,40 @@ def _configure_hermes(cfg: "SkillClawConfig") -> None:
     if not isinstance(model, dict):
         model = {"default": model} if isinstance(model, str) and model.strip() else {}
 
-    model["provider"] = "custom"
+    responses_mode = str(getattr(cfg, "llm_api_mode", "") or "").strip().lower() == "responses"
+
+    if responses_mode:
+        # SkillClaw is forwarding to a Responses-only backend (the Codex
+        # endpoint under ``codex_oauth``), so the proxy exposes /v1/responses
+        # but NOT /v1/chat/completions.
+        #
+        # Hermes deliberately *discards* ``api_mode: codex_responses`` for a
+        # bare ``provider: custom`` pointed at a non-OpenAI host (see
+        # hermes_cli/runtime_provider.py::_resolve_plain_custom_api_mode) as a
+        # guard against stale config. A NAMED custom provider is the supported
+        # opt-in: its ``transport`` is honoured verbatim. Register one so the
+        # Responses wire survives, instead of silently falling back to chat
+        # completions and 404-ing against the proxy.
+        providers = data.get("providers")
+        if not isinstance(providers, dict):
+            providers = {}
+        providers[_HERMES_PROVIDER_NAME] = {
+            "name": "SkillClaw",
+            "base_url": base_url,
+            "api_key": api_key,
+            "transport": "codex_responses",
+        }
+        data["providers"] = providers
+        model["provider"] = _HERMES_PROVIDER_NAME
+        model["api_mode"] = "codex_responses"
+    else:
+        model["provider"] = "custom"
+        # Clear stale provider-specific mode so Hermes auto-detects from the URL.
+        model["api_mode"] = ""
+
     model["base_url"] = base_url
     model["default"] = model_id
     model["api_key"] = api_key
-    # Clear stale provider-specific mode so Hermes auto-detects from the proxy URL.
-    model["api_mode"] = ""
 
     data["model"] = model
     _backup_hermes_config_if_changed(config_path, _yaml_mapping_to_text(data))
@@ -513,8 +546,12 @@ def inspect_hermes_config(cfg: "SkillClawConfig") -> dict[str, object]:
     configured_api_key = str(model.get("api_key", "") or "")
 
     backup_path = _latest_hermes_backup_path()
+    # Either wiring is valid: a bare ``custom`` provider for chat-completions
+    # upstreams, or the named ``skillclaw`` provider used when the upstream is
+    # Responses-only (see _configure_hermes for why the named entry is
+    # required there).
     proxy_match = (
-        configured_provider == "custom"
+        configured_provider in {"custom", _HERMES_PROVIDER_NAME}
         and configured_base_url == expected_base_url
         and configured_default == expected_model
         and configured_api_key == expected_api_key

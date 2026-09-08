@@ -710,6 +710,7 @@ class SkillHub:
             shutil.copytree(skills_dir, backup_dir, symlinks=True)
         except Exception as e:
             logger.warning("[SkillHub] backup before pull failed: %s", e)
+            shutil.rmtree(backup_dir, ignore_errors=True)
             self._prune_backups(backup_root, backup_prefix, keep=3)
             return _result(
                 downloaded=0,

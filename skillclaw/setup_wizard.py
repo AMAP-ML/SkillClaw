@@ -43,6 +43,10 @@ _PROVIDER_PRESETS = {
         "api_base": "https://api.atlascloud.ai/v1",
         "model_id": "deepseek-ai/DeepSeek-V3.1",
     },
+    "cheaperinference": {
+        "api_base": "https://api.cheaperinference.com/v1",
+        "model_id": "gpt-5.4-mini",
+    },
     "bedrock": {
         "api_base": "",
         "model_id": "us.anthropic.claude-sonnet-4-6",
@@ -52,9 +56,21 @@ _PROVIDER_PRESETS = {
         "model_id": "",
     },
 }
-_PROVIDER_CHOICES = ["kimi", "qwen", "openai", "minimax", "novita", "openrouter", "atlascloud", "bedrock", "custom"]
+_PROVIDER_CHOICES = [
+    "kimi",
+    "qwen",
+    "openai",
+    "minimax",
+    "novita",
+    "openrouter",
+    "atlascloud",
+    "cheaperinference",
+    "bedrock",
+    "custom",
+]
 _PROVIDER_DEFAULT_API_MODE = {
     "atlascloud": "chat",
+    "cheaperinference": "chat",
 }
 
 

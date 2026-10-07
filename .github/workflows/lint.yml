@@ -15,3 +15,17 @@ jobs:
       - run: uv sync --extra all
       - run: uvx ruff@0.12.2 check .
       - run: uvx ruff@0.12.2 format --check .
+
+  windows-runtime:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      # runtime_state and the package's lazy entrypoint need only the stdlib.
+      - run: python -m pip install pytest
+      - run: python -m pytest -q tests/test_runtime_state_windows.py

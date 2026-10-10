@@ -1,30 +1,8 @@
-"""SkillClaw session capture as a native Hermes plugin (no proxy).
+"""Opt-in, local Hermes turn capture; provider routing is never changed.
 
-The default Hermes integration rewrites ``~/.hermes/config.yaml`` so that all model
-traffic goes through the SkillClaw proxy. That cannot work when Hermes talks to a
-provider the proxy cannot forward to (subscription OAuth such as ChatGPT/Codex or
-Claude, several providers across Hermes profiles, provider-side fallback chains).
-
-This plugin keeps Hermes' own provider routing untouched and only observes finished
-turns through Hermes' ``post_llm_call`` hook. Turns of one Hermes session are written
-as ONE session record in the format the evolve server already consumes
-(``{group_id}/sessions/<id>.json`` with ``num_turns`` + ``turns[]``), including
-``read_skills`` / ``modified_skills`` derived from Hermes' ``skill_view`` /
-``skill_manage`` tool calls, so sessions are grouped by the skills they used instead
-of all landing in the no-skill bucket.
-
-Configuration (environment variables, read at registration time):
-
-- ``SKILLCLAW_CAPTURE_ROOT``  local shared root, same as ``sharing.local_root``
-  of the evolve server (required; the plugin is inert without it)
-- ``SKILLCLAW_GROUP_ID``      group id (default ``default``)
-- ``SKILLCLAW_USER_ALIAS``    alias recorded in sessions (default: Hermes profile name)
-- ``SKILLCLAW_CAPTURE_IDLE_SECONDS``  idle time after which an open session is
-  published to the queue (default 1800)
-
-What is stored: the user message and final assistant text of each turn (secrets
-redacted), the model, tool NAMES and skill names. System prompts, earlier history,
-tool arguments and tool results are never stored.
+Only finished-turn text, model/platform, tool names and skill references are stored.
+System prompts, history and tool arguments/results are not persisted. Redaction is
+best-effort, NOT anonymization. See ../README.md for lifecycle and privacy limits.
 """
 
 from __future__ import annotations
@@ -32,8 +10,12 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import logging
+import math
 import os
 import re
+import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -41,14 +23,16 @@ MAX_TURNS = 40
 MAX_RECORD_BYTES = 1024 * 1024
 _TOOL_NAME = re.compile(r"[A-Za-z0-9_.:-]{1,120}")
 _SKILL_REF = re.compile(r"[A-Za-z0-9_.:/-]{1,200}")
-SKILL_READ_TOOLS = {"skill_view"}
-SKILL_WRITE_TOOLS = {"skill_manage"}
+_COMPONENT = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9_.-]{0,79}")
+_HASH = re.compile(r"[a-f0-9]{64}")
+_WRITE_ACTIONS = {"create", "edit", "patch", "delete", "write_file", "remove_file"}
 INTERNAL_SESSION_PREFIXES = ("skillclaw-evolve-", "skillclaw-validate-")
+logger = logging.getLogger(__name__)
 
 
 def scrub(value: object) -> str:
     text = str(value or "")
-    try:  # Hermes' own redactor when running inside Hermes
+    try:
         from agent.redact import redact_sensitive_text
 
         text = redact_sensitive_text(text, force=True)
@@ -60,44 +44,69 @@ def scrub(value: object) -> str:
     return text
 
 
-def _atomic_json(path: Path, value: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+def _sync_dir(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _mkdir(path: Path) -> None:
+    if not path.exists():
+        _mkdir(path.parent)
+        path.mkdir(mode=0o700, exist_ok=True)
+        _sync_dir(path.parent)
+
+
+def _encoded(value: dict) -> bytes:
     data = json.dumps(value, ensure_ascii=False).encode("utf-8")
     if len(data) > MAX_RECORD_BYTES:
         raise ValueError("session record exceeds size bound")
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    return data
+
+
+def _atomic_json(path: Path, value: dict) -> None:
+    data = _encoded(value)
+    _mkdir(path.parent)
+    fd, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    tmp = Path(name)
     try:
         with os.fdopen(fd, "wb") as out:
             out.write(data)
             out.flush()
             os.fsync(out.fileno())
         os.replace(tmp, path)
+        _sync_dir(path.parent)
     finally:
         tmp.unlink(missing_ok=True)
 
 
 def _arguments(call: dict) -> dict:
-    raw = (call.get("function") or {}).get("arguments", "{}")
+    function = call.get("function")
+    raw = function.get("arguments") if isinstance(function, dict) else None
     if isinstance(raw, dict):
         return raw
     try:
         value = json.loads(raw or "{}")
-    except Exception:
+    except (TypeError, ValueError):
         return {}
     return value if isinstance(value, dict) else {}
 
 
 def _skill_name(args: dict) -> str:
-    for key in ("name", "skill_name", "skill"):
-        value = args.get(key)
-        if isinstance(value, str) and _SKILL_REF.fullmatch(value.strip()):
-            return value.strip().split("/")[-1]
+    value = args.get("name")
+    if isinstance(value, str) and _SKILL_REF.fullmatch(value):
+        return value.split("/")[-1]
     return ""
 
 
 def current_turn_tools(conversation_history: list | None) -> tuple[list[str], list[dict], list[dict]]:
-    """Tool names and skill references of the current turn (after the last user message)."""
+    """Attribute attempted calls, not successful results, after the last user message.
+
+    skill_view has a single name/file_path; parallel calls are separate tool_calls.
+    skill_manage advertises operations[]; older transcripts use flat action/name.
+    """
     names: set[str] = set()
     read: dict[str, dict] = {}
     modified: dict[str, dict] = {}
@@ -107,42 +116,95 @@ def current_turn_tools(conversation_history: list | None) -> tuple[list[str], li
         if msg.get("role") == "user":
             break
         for call in msg.get("tool_calls") or []:
-            if not isinstance(call, dict):
+            if not isinstance(call, dict) or not isinstance(call.get("function"), dict):
                 continue
-            name = str((call.get("function") or {}).get("name") or "")
-            if not _TOOL_NAME.fullmatch(name):
+            name = call["function"].get("name")
+            if not isinstance(name, str) or not _TOOL_NAME.fullmatch(name):
                 continue
             names.add(name)
-            if name not in SKILL_READ_TOOLS and name not in SKILL_WRITE_TOOLS:
+            if name not in {"skill_view", "skill_manage"}:
                 continue
             args = _arguments(call)
-            skill = _skill_name(args)
-            if not skill:
+            operations = args.get("operations", [args]) if name == "skill_manage" else [args]
+            if not isinstance(operations, list):
                 continue
-            ref = {"skill_id": "", "skill_name": skill}
-            file_path = args.get("file_path")
-            if name in SKILL_READ_TOOLS and isinstance(file_path, str) and _SKILL_REF.fullmatch(file_path):
-                ref["path"] = file_path
-            (read if name in SKILL_READ_TOOLS else modified).setdefault(skill, ref)
+            for op in operations:
+                if not isinstance(op, dict):
+                    continue
+                action = op.get("action")
+                if name == "skill_manage" and (not isinstance(action, str) or action not in _WRITE_ACTIONS):
+                    continue
+                skill = _skill_name(op)
+                if not skill:
+                    continue
+                ref = {"skill_id": "", "skill_name": skill}
+                file_path = op.get("file_path")
+                if name == "skill_view" and isinstance(file_path, str) and _SKILL_REF.fullmatch(file_path):
+                    ref["path"] = file_path
+                (read if name == "skill_view" else modified).setdefault(skill, ref)
     return sorted(names), list(read.values()), list(modified.values())
 
 
+def _home() -> Path:
+    try:
+        from hermes_constants import get_hermes_home
+    except ImportError:
+        return Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes").expanduser().resolve()
+    return Path(get_hermes_home()).expanduser().resolve()
+
+
 class SessionCapture:
-    """Accumulates turns per Hermes session and publishes idle sessions to the queue."""
+    """Profile-local accumulation with durable receipts and atomic queue handoff."""
 
     def __init__(
-        self, root: str | Path, group_id: str = "default", user_alias: str = "hermes", idle_seconds: int = 1800
+        self,
+        root: str | Path,
+        group_id: str = "default",
+        user_alias: str = "hermes",
+        idle_seconds: float = 1800,
+        profile_id: str | None = None,
     ) -> None:
-        self.root = Path(root).expanduser()
+        if not _COMPONENT.fullmatch(group_id) or not _COMPONENT.fullmatch(user_alias):
+            raise ValueError("group_id and user_alias must be safe path components (1-80 characters)")
+        if not math.isfinite(idle_seconds) or idle_seconds <= 0:
+            raise ValueError("idle_seconds must be finite and positive")
+        self.root = Path(root).expanduser().resolve()
         self.group_id = group_id
         self.user_alias = user_alias
         self.idle_seconds = idle_seconds
+        identity = f"{profile_id if profile_id is not None else _home()}\0{user_alias}"
+        self.namespace = hashlib.sha256(identity.encode()).hexdigest()
         self.queue = self.root / group_id / "sessions"
-        self.state = self.root / ".hermes-capture" / group_id
+        self.state = self.root / ".hermes-capture" / group_id / self.namespace
         self.open_dir = self.state / "open"
         self.seen_dir = self.state / "seen"
+        self._stopped = threading.Event()
+        self._worker: threading.Thread | None = None
 
-    # -- hook entry points -------------------------------------------------
+    def start(self) -> None:
+        if self._worker is None:
+            self._worker = threading.Thread(target=self._run, name="skillclaw-capture-idle", daemon=True)
+            self._worker.start()
+
+    def stop(self) -> None:
+        self._stopped.set()
+        if self._worker is not None:
+            self._worker.join()
+
+    def _run(self) -> None:
+        while not self._stopped.wait(min(30.0, self.idle_seconds)):
+            try:
+                self.flush_idle()
+            except (OSError, ValueError):
+                logger.warning("SkillClaw idle capture failed; retained state for retry")
+
+    def _session_hash(self, session_id: str) -> str:
+        return hashlib.sha256(f"{self.namespace}\0{session_id}".encode()).hexdigest()
+
+    def _remember(self, session_hash: str, turn_hash: str) -> None:
+        marker = self.seen_dir / f"{session_hash}-{turn_hash}"
+        if not marker.exists():
+            _atomic_json(marker, {})
 
     def on_turn(
         self,
@@ -156,7 +218,7 @@ class SessionCapture:
         platform: str = "",
         **_: object,
     ) -> None:
-        if not session_id or not turn_id or not assistant_response:
+        if self._stopped.is_set() or not session_id or not turn_id or not assistant_response:
             return
         if str(session_id).startswith(INTERNAL_SESSION_PREFIXES):
             return
@@ -164,67 +226,72 @@ class SessionCapture:
         turn = {
             "prompt_text": scrub(user_message)[:24000],
             "response_text": scrub(assistant_response)[:48000],
-            "model": model,
-            "platform": platform,
+            "model": scrub(model)[:200],
+            "platform": scrub(platform)[:120],
             "tool_names": tool_names,
             "read_skills": read_skills,
             "modified_skills": modified_skills,
             "turn_hash": hashlib.sha256(str(turn_id).encode()).hexdigest(),
         }
-        session_hash = hashlib.sha256(str(session_id).encode()).hexdigest()
-        marker = self.seen_dir / hashlib.sha256(f"{session_id}\0{turn_id}".encode()).hexdigest()
-        open_path = self.open_dir / f"{self.user_alias}-{session_hash}.json"
+        session_hash = self._session_hash(str(session_id))
+        marker = self.seen_dir / f"{session_hash}-{turn['turn_hash']}"
+        open_path = self.open_dir / f"{session_hash}.json"
+        fresh = {
+            "session_id": f"{self.user_alias}-{session_hash}-{turn['turn_hash']}",
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "user_alias": self.user_alias,
+            "num_turns": 1,
+            "turns": [turn],
+        }
+        _encoded(fresh)  # Reject an oversized single turn before publishing or changing anything.
         with self._lock():
-            if marker.exists():  # duplicate hook delivery
+            if self._stopped.is_set() or marker.exists():
                 return
-            record = self._load(open_path) or {
-                "session_id": f"{self.user_alias}-{session_hash}",
-                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "user_alias": self.user_alias,
-                "num_turns": 0,
-                "turns": [],
-            }
-            record["turns"].append(turn)
-            record["num_turns"] = len(record["turns"])
-            try:
-                _atomic_json(open_path, record)
-            except ValueError:  # too large: close the episode, start a new one with this turn
-                record["turns"].pop()
-                record["num_turns"] = len(record["turns"])
-                if record["turns"]:
-                    _atomic_json(open_path, record)
+            record = self._load(open_path)
+            if record and any(t["turn_hash"] == turn["turn_hash"] for t in record["turns"]):
+                self._remember(session_hash, turn["turn_hash"])
+                return  # Recovered a crash after record commit but before receipt commit.
+            if record:
+                candidate = {**record, "turns": [*record["turns"], turn], "num_turns": record["num_turns"] + 1}
+                try:
+                    _encoded(candidate)
+                    fits = record["num_turns"] < MAX_TURNS
+                except ValueError:
+                    fits = False
+                if fits:
+                    fresh = candidate
+                else:
                     self._publish(open_path)
-                record.update(turns=[turn], num_turns=1)
-                _atomic_json(open_path, record)
-            self.seen_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-            os.close(os.open(marker, os.O_CREAT | os.O_WRONLY, 0o600))
-            if record["num_turns"] >= MAX_TURNS:
+            _atomic_json(open_path, fresh)
+            self._remember(session_hash, turn["turn_hash"])
+            if fresh["num_turns"] >= MAX_TURNS:
                 self._publish(open_path)
-            self._flush_idle_locked(exclude=open_path)
 
     def on_session_closed(self, *, session_id: str = "", old_session_id: str = "", **_: object) -> None:
-        """Gateway/CLI reset or shutdown: publish the finished session right away."""
         sid = old_session_id or session_id
-        if not sid:
+        if self._stopped.is_set() or not sid:
             return
-        path = self.open_dir / f"{self.user_alias}-{hashlib.sha256(str(sid).encode()).hexdigest()}.json"
         with self._lock():
-            if path.exists():
-                self._publish(path)
+            if not self._stopped.is_set():
+                self._publish(self.open_dir / f"{self._session_hash(str(sid))}.json")
 
-    def flush_idle(self, idle_seconds: int | None = None) -> list[str]:
+    def flush_idle(self, idle_seconds: float | None = None) -> list[str]:
         with self._lock():
-            return self._flush_idle_locked(idle_seconds=idle_seconds)
-
-    # -- internals -----------------------------------------------------------
+            if self._stopped.is_set():
+                return []
+            return self._flush_idle_locked(idle_seconds)
 
     def _lock(self):
-        self.state.mkdir(parents=True, exist_ok=True, mode=0o700)
-        handle = open(self.state / ".lock", "a")
+        _mkdir(self.state)
+        handle = os.fdopen(os.open(self.state / ".lock", os.O_CREAT | os.O_RDWR, 0o600), "a")
 
         class _Held:
             def __enter__(self_inner):
-                fcntl.flock(handle, fcntl.LOCK_EX)
+                try:
+                    fcntl.flock(handle, fcntl.LOCK_EX)
+                except BaseException:
+                    handle.close()
+                    raise
                 return handle
 
             def __exit__(self_inner, *exc):
@@ -234,37 +301,60 @@ class SessionCapture:
 
     @staticmethod
     def _load(path: Path) -> dict | None:
-        if not path.exists():
-            return None
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
+            raw = path.read_bytes()
+        except FileNotFoundError:
             return None
+        record = None
+        try:
+            record = json.loads(raw)
+            valid = (
+                len(raw) <= MAX_RECORD_BYTES
+                and isinstance(record, dict)
+                and isinstance(record.get("session_id"), str)
+                and re.fullmatch(r"[A-Za-z0-9_.-]{1,220}", record["session_id"])
+                and isinstance(record.get("turns"), list)
+                and bool(record["turns"])
+                and record.get("num_turns") == len(record["turns"])
+                and all(isinstance(t, dict) and _HASH.fullmatch(str(t.get("turn_hash", ""))) for t in record["turns"])
+            )
+        except (ValueError, UnicodeError):
+            valid = False
+        if not valid:
+            raise ValueError("invalid capture state; preserved for manual recovery")
+        return record
 
     def _publish(self, path: Path) -> str | None:
         record = self._load(path)
-        if not record or not record.get("turns"):
-            path.unlink(missing_ok=True)
+        if record is None:
             return None
-        first = str(record["turns"][0].get("turn_hash", ""))[:12] or str(int(time.time()))
-        key = f"{record['session_id']}-{first}"  # unique per episode, never overwritten
-        record["session_id"] = key
-        _atomic_json(self.queue / f"{key}.json", record)
-        path.unlink(missing_ok=True)
-        return key
+        # Receipts must be durable BEFORE handoff. A consumer can remove the queue
+        # file immediately; recovery must not depend on its continued presence.
+        for turn in record["turns"]:
+            self._remember(path.stem, turn["turn_hash"])
+        _mkdir(self.queue)
+        target = self.queue / f"{record['session_id']}.json"
+        if target.exists():
+            raise FileExistsError("capture queue collision; preserved both records")
+        # A single rename, not copy + unlink: no two-copy process-crash window.
+        os.replace(path, target)
+        _sync_dir(self.queue)
+        _sync_dir(self.open_dir)
+        return record["session_id"]
 
-    def _flush_idle_locked(self, idle_seconds: int | None = None, exclude: Path | None = None) -> list[str]:
+    def _flush_idle_locked(self, idle_seconds: float | None = None) -> list[str]:
         idle = self.idle_seconds if idle_seconds is None else idle_seconds
         now = time.time()
         published = []
-        if not self.open_dir.exists():
-            return published
         for path in sorted(self.open_dir.glob("*.json")):
-            if path == exclude or now - path.stat().st_mtime < idle:
-                continue
-            key = self._publish(path)
-            if key:
-                published.append(key)
+            try:
+                if now - path.stat().st_mtime < idle:
+                    continue
+                key = self._publish(path)
+                if key:
+                    published.append(key)
+            except (OSError, ValueError):
+                logger.warning("SkillClaw could not publish a record; retained state for manual recovery or retry")
         return published
 
 
@@ -276,17 +366,16 @@ def register(ctx) -> None:
     root = os.environ.get("SKILLCLAW_CAPTURE_ROOT", "").strip()
     if not root:
         return
-    try:
-        from hermes_constants import get_hermes_home
-
-        home = Path(get_hermes_home())
-    except Exception:
-        home = Path.home() / ".hermes"
+    home = _home()
     capture = SessionCapture(
         root,
         group_id=os.environ.get("SKILLCLAW_GROUP_ID", "default").strip() or "default",
         user_alias=os.environ.get("SKILLCLAW_USER_ALIAS", "").strip() or _profile_name(home),
-        idle_seconds=int(os.environ.get("SKILLCLAW_CAPTURE_IDLE_SECONDS", "1800") or 1800),
+        idle_seconds=float(os.environ.get("SKILLCLAW_CAPTURE_IDLE_SECONDS", "1800") or 1800),
+        profile_id=str(home),
     )
     ctx.register_hook("post_llm_call", capture.on_turn)
     ctx.register_hook("on_session_finalize", capture.on_session_closed)
+    ctx.register_hook("on_session_reset", capture.on_session_closed)
+    ctx.on_unload(capture.stop)
+    capture.start()

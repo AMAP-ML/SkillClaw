@@ -107,24 +107,20 @@ def build_skill_md(skill: dict) -> str:
     category = skill.get("category", "general")
     content = skill.get("content", "")
 
-    needs_quoting = any(c in description for c in ":{}[],\"'#&*!|>%@`\n")
-    if needs_quoting:
-        escaped = description.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
-        desc_line = f'description: "{escaped}"'
-    else:
-        desc_line = f"description: {description}"
+    import yaml
 
-    fm_lines = [f"name: {name}", desc_line, f"category: {category}"]
+    frontmatter = {"name": name, "description": description, "category": category}
 
     extra_fm = skill.get("extra_frontmatter")
     if isinstance(extra_fm, dict):
-        import yaml
-
         for key, value in extra_fm.items():
             if key not in ("name", "description", "category"):
-                fm_lines.append(f"{key}: {yaml.dump(value, default_flow_style=True).strip()}")
+                frontmatter[key] = value
 
-    return "---\n" + "\n".join(fm_lines) + "\n---\n\n" + content + "\n"
+    # Dump the mapping once: individual scalar dumps can insert YAML document
+    # terminators into the middle of the frontmatter.
+    rendered = yaml.safe_dump(frontmatter, allow_unicode=True, sort_keys=False)
+    return "---\n" + rendered + "---\n\n" + content + "\n"
 
 
 def parse_skill_content(name: str, raw_md: str) -> dict[str, Any]:

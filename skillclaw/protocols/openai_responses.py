@@ -48,6 +48,12 @@ def content_to_openai_chat_content(content: Any) -> str | list[dict[str, Any]]:
                 image_url = image_url.get("url")
             if isinstance(image_url, str) and image_url:
                 parts.append({"type": "image_url", "image_url": {"url": image_url}})
+        elif item_type in {"input_video", "video_url"}:
+            video_url = item.get("video_url") or item.get("url")
+            if isinstance(video_url, dict):
+                video_url = video_url.get("url")
+            if isinstance(video_url, str) and video_url:
+                parts.append({"type": "video_url", "video_url": {"url": video_url}})
     if not parts:
         return ""
     if all(part.get("type") == "text" for part in parts):

@@ -1,3 +1,5 @@
+import pytest
+
 from skillclaw import setup_wizard
 from skillclaw.setup_wizard import SetupWizard
 
@@ -89,7 +91,7 @@ def test_setup_wizard_atlascloud_preset_uses_chat_bridge(monkeypatch, tmp_path):
     assert saved["llm"]["api_mode"] == "chat"
 
 
-def test_setup_wizard_minimax_preset_defaults_to_m3_and_global_region(monkeypatch, tmp_path):
+def test_setup_wizard_minimax_preset_defaults_to_flash_and_global_region(monkeypatch, tmp_path, capsys):
     saved = {}
 
     class FakeConfigStore:
@@ -110,6 +112,7 @@ def test_setup_wizard_minimax_preset_defaults_to_m3_and_global_region(monkeypatc
         return default if default else choices[0]
 
     monkeypatch.setattr(setup_wizard, "ConfigStore", FakeConfigStore)
+    monkeypatch.setattr(setup_wizard, "CONFIG_DIR", tmp_path)
     monkeypatch.setattr(setup_wizard, "_prompt_choice", fake_prompt_choice)
     monkeypatch.setattr(setup_wizard, "_prompt", lambda msg, default="", hide=False: default)
     monkeypatch.setattr(setup_wizard, "_prompt_bool", lambda msg, default=False: default)
@@ -118,7 +121,9 @@ def test_setup_wizard_minimax_preset_defaults_to_m3_and_global_region(monkeypatc
     SetupWizard().run()
 
     assert saved["llm"]["provider"] == "minimax"
-    assert saved["llm"]["model_id"] == "MiniMax-M3"
+    assert saved["llm"]["model_id"] == "MiniMax-M3.1-Flash"
+    assert setup_wizard._PROVIDER_PRESETS["minimax"]["model_ids"] == ["MiniMax-M3.1-Flash", "MiniMax-M3"]
+    assert "Available models: MiniMax-M3.1-Flash, MiniMax-M3" in capsys.readouterr().out
     assert saved["llm"]["api_base"] == "https://api.minimax.io/v1"
     assert saved["llm"]["region"] == "global_en"
 
@@ -146,6 +151,7 @@ def test_setup_wizard_minimax_preset_china_region_selects_cn_endpoint(monkeypatc
         return default if default else choices[0]
 
     monkeypatch.setattr(setup_wizard, "ConfigStore", FakeConfigStore)
+    monkeypatch.setattr(setup_wizard, "CONFIG_DIR", tmp_path)
     monkeypatch.setattr(setup_wizard, "_prompt_choice", fake_prompt_choice)
     monkeypatch.setattr(setup_wizard, "_prompt", lambda msg, default="", hide=False: default)
     monkeypatch.setattr(setup_wizard, "_prompt_bool", lambda msg, default=False: default)
@@ -156,3 +162,63 @@ def test_setup_wizard_minimax_preset_china_region_selects_cn_endpoint(monkeypatc
     assert saved["llm"]["provider"] == "minimax"
     assert saved["llm"]["api_base"] == "https://api.minimaxi.com/v1"
     assert saved["llm"]["region"] == "cn_zh"
+    assert saved["llm"]["model_id"] == "MiniMax-M3.1-Flash"
+
+
+@pytest.mark.parametrize(
+    ("current_provider", "current_model", "entered_model", "expected_model"),
+    [
+        ("minimax", "MiniMax-M3", "", "MiniMax-M3"),
+        ("minimax", "custom-model", "", "custom-model"),
+        ("custom", "custom-model", "", "MiniMax-M3.1-Flash"),
+        ("custom", "custom-model", "MiniMax-M3", "MiniMax-M3"),
+        ("custom", "custom-model", "custom-deployment", "custom-deployment"),
+    ],
+)
+def test_setup_wizard_minimax_model_input(
+    monkeypatch, tmp_path, current_provider, current_model, entered_model, expected_model
+):
+    saved = {}
+
+    class FakeConfigStore:
+        config_file = tmp_path / "config.yaml"
+
+        def exists(self):
+            return True
+
+        def load(self):
+            return {
+                "llm": {
+                    "provider": current_provider,
+                    "model_id": current_model,
+                    "api_base": "https://custom.example/v1",
+                },
+                "skills": {"enabled": False, "dir": str(tmp_path / "skills")},
+                "prm": {"enabled": False},
+                "sharing": {"enabled": False},
+            }
+
+        def save(self, data):
+            saved.update(data)
+
+    def fake_prompt(msg, default="", hide=False):
+        if msg == "Model ID":
+            return entered_model or default
+        return default
+
+    monkeypatch.setattr(setup_wizard, "ConfigStore", FakeConfigStore)
+    monkeypatch.setattr(
+        setup_wizard,
+        "_prompt_choice",
+        lambda msg, choices, default="": "minimax" if msg == "LLM provider" else default,
+    )
+    monkeypatch.setattr(setup_wizard, "_prompt", fake_prompt)
+    monkeypatch.setattr(setup_wizard, "_prompt_bool", lambda msg, default=False: default)
+    monkeypatch.setattr(setup_wizard, "_prompt_int", lambda msg, default=0: default)
+
+    SetupWizard().run()
+
+    assert saved["llm"]["model_id"] == expected_model
+    assert saved["llm"]["api_base"] == (
+        "https://custom.example/v1" if current_provider == "minimax" else "https://api.minimax.io/v1"
+    )

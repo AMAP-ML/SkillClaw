@@ -517,6 +517,8 @@ To verify the loop:
 
 This setup shares session evidence and generated skills with the group. `group_id` is a namespace, not an access-control boundary; use filesystem/share permissions and separate roots for different trust groups. Automated privacy redaction is not provided by this setup. The default publish mode is `direct`; use the `validated` flow above if clients should review candidates before publication.
 
+For Cloudflare R2, use the **account endpoint**, such as `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`, with `sharing.backend s3`, `sharing.bucket <bucket-name>`, and `sharing.region auto`. Do not append the bucket to `sharing.endpoint`: boto3 sends the bucket separately. SkillClaw rejects that configuration before making a storage request. See the [R2 S3 API documentation](https://developers.cloudflare.com/r2/api/s3/api/).
+
 ## Quick Reference
 
 **Operational model** — Every user has their own `skillclaw` process and `~/.skillclaw/config.yaml`. Each group maps to a `group_id`; one evolve server watches that namespace, turns sessions into skills, and writes them back. Joining a group only requires the correct sharing config on the client side.

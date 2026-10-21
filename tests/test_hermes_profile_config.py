@@ -31,7 +31,10 @@ def config(path, **kwargs):
     return SkillClawConfig(
         llm_api_base="https://upstream.test/v1",
         llm_model_id="model-a",
-        claw_type="hermes", hermes_config_path=str(path), skills_dir=str(path.parent / "skills"), **kwargs
+        claw_type="hermes",
+        hermes_config_path=str(path),
+        skills_dir=str(path.parent / "skills"),
+        **kwargs,
     )
 
 

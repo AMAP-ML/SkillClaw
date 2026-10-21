@@ -309,8 +309,13 @@ class SetupWizard:
                 "Auto-pull shared skills on startup",
                 default=current_sharing.get("auto_pull_on_start", False),
             )
+            upload_sessions = _prompt_bool(
+                "Upload conversation and tool contents for shared skill evolution",
+                default=current_sharing.get("upload_sessions", current_sharing.get("enabled", False)),
+            )
             sharing_config = {
                 "enabled": True,
+                "upload_sessions": upload_sessions,
                 "backend": sharing_backend,
                 "group_id": group_id,
                 "user_alias": user_alias,

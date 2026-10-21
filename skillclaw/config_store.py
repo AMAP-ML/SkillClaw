@@ -77,6 +77,7 @@ _DEFAULTS: dict = {
     },
     "sharing": {
         "enabled": False,
+        "upload_sessions": True,
         "backend": "",
         "endpoint": "",
         "bucket": "",
@@ -401,6 +402,7 @@ class ConfigStore:
             configure_openclaw=configure_openclaw,
             # Sharing
             sharing_enabled=bool(sharing.get("enabled", False)),
+            sharing_upload_sessions=bool(sharing.get("upload_sessions", True)),
             sharing_backend=sharing_backend,
             sharing_endpoint=sharing_endpoint,
             sharing_bucket=sharing_bucket,
@@ -536,6 +538,7 @@ class ConfigStore:
             lines += [
                 f"sharing.group:   {sharing.get('group_id', 'default')}",
                 f"sharing.alias:   {sharing.get('user_alias', '?')}",
+                f"sharing.upload_sessions: {sharing.get('upload_sessions', True)}",
                 f"sharing.auto_pull: {sharing.get('auto_pull_on_start', False)}",
                 "sharing.session_upload_interval: "
                 f"{_normalize_non_negative_int(sharing.get('session_upload_interval', 0), default=0)}",

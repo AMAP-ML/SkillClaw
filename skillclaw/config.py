@@ -88,6 +88,7 @@ class SkillClawConfig:
     # Skill sharing (generic object storage)                              #
     # ------------------------------------------------------------------ #
     sharing_enabled: bool = False
+    sharing_upload_sessions: bool = True
     sharing_backend: str = ""
     sharing_endpoint: str = ""
     sharing_bucket: str = ""

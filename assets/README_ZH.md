@@ -467,6 +467,8 @@ Bob 使用相同配置，只把 `sharing.local_root` 改为 `/Volumes/skillclaw-
 
 同组用户共享会话证据和生成的技能。`group_id` 只是命名空间，不是权限隔离；不同信任组应使用独立共享根目录和文件系统/共享访问权限。本例没有自动隐私脱敏。默认发布模式为 `direct`；若需先让客户端验证候选技能，请使用上文的 `validated` 流程。
 
+Cloudflare R2 应使用**账号级 endpoint**，例如 `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`，并配置 `sharing.backend s3`、`sharing.bucket <bucket-name>`、`sharing.region auto`。不要把 bucket 拼到 `sharing.endpoint` 后面；boto3 会单独发送 bucket。SkillClaw 会在访问存储前拒绝这种错误配置。参见 [R2 S3 API 文档](https://developers.cloudflare.com/r2/api/s3/api/)。
+
 ### 可选：Chat 上游故障切换
 
 在当前 `config.yaml` 的 `llm` 下配置最多三个按顺序尝试的 OpenAI-compatible Chat 备用端点。CLI 不支持 `fallbacks[0]` 这种索引赋值，请编辑 YAML：

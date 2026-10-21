@@ -14,6 +14,7 @@ import io
 import os
 from pathlib import Path
 from typing import Iterator
+from urllib.parse import urlsplit
 
 
 class ObjectInfo:
@@ -123,6 +124,14 @@ class S3ObjectStore:
         region: str = "",
         session_token: str = "",
     ) -> None:
+        parsed_endpoint = urlsplit(endpoint)
+        if (parsed_endpoint.hostname or "").endswith(".r2.cloudflarestorage.com"):
+            if parsed_endpoint.path not in {"", "/"}:
+                raise ValueError(
+                    "Cloudflare R2 endpoint must be the account endpoint without a bucket/path suffix "
+                    "(https://<ACCOUNT_ID>.r2.cloudflarestorage.com). "
+                    "Set the bucket separately in sharing.bucket / EVOLVE_STORAGE_BUCKET."
+                )
         try:
             import boto3
         except ImportError as exc:

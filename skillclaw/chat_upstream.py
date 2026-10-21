@@ -65,6 +65,8 @@ def chat_endpoints(config, requested_model):
 def prepare_chat_request(config, body, endpoint, *, stream=False):
     payload = copy.deepcopy({k: v for k, v in body.items() if k not in {"logprobs", "top_logprobs", "stream_options"}})
     payload.update(model=endpoint["model_id"], stream=stream)
+    if stream and isinstance(body.get("stream_options"), dict):
+        payload["stream_options"] = copy.deepcopy(body["stream_options"])
     headers = {}
     if endpoint["api_key"]:
         headers["Authorization"] = f"Bearer {endpoint['api_key']}"
@@ -97,12 +99,12 @@ def retry_after_seconds(response):
             return None
 
 
-async def forward_chat(config, body, *, timeout, collect_stream):
+async def forward_chat(config, body, *, timeout, collect_stream, stream=False):
     endpoints = chat_endpoints(config, body.get("model", ""))
 
     async def run():
         index = 0
-        url, payload, headers = prepare_chat_request(config, body, endpoints[index])
+        url, payload, headers = prepare_chat_request(config, body, endpoints[index], stream=stream)
         last_status = None
         async with httpx.AsyncClient(timeout=timeout) as client:
             # A shared budget bounds the total attempts, including compatibility
@@ -150,7 +152,7 @@ async def forward_chat(config, body, *, timeout, collect_stream):
                     raise HTTPException(status_code=502, detail="Upstream LLM returned invalid JSON") from exc
                 if index + 1 < len(endpoints):
                     index += 1
-                    url, payload, headers = prepare_chat_request(config, body, endpoints[index])
+                    url, payload, headers = prepare_chat_request(config, body, endpoints[index], stream=stream)
                     continue
                 if attempt < 5:
                     await asyncio.sleep(delay if delay is not None else min(2**attempt + random.uniform(0, 1), 30))

@@ -549,6 +549,12 @@ On a connection failure or HTTP 408/429/500/502/503/504, the proxy tries the nex
 
 The entire operation has six attempts and the existing `SKILLCLAW_LLM_REQUEST_TIMEOUT_S` time budget, including backoff and `Retry-After`. Long final quota windows fail promptly. Native Responses and Bedrock forwarding, and the standalone evolve-server LLM client, do not use this list. Restart the proxy after editing configuration.
 
+### Real-time Chat streaming
+
+OpenAI-compatible `/v1/chat/completions` now forwards `stream: true` incrementally, including separate `reasoning_content` and structured tool-call deltas. The completed turn is recorded once; cancellation or incomplete/error streams close the upstream and do not record a successful turn. Failover is allowed before a successful upstream stream starts, never after emitted output. Errors after HTTP headers are sent appear as an SSE `error` object without `[DONE]`.
+
+Streaming requires structured OpenAI tool calls; textual tool-tag repair is available only for buffered requests. Bedrock and Chat-to-Anthropic/Responses conversion retain their existing behavior. Disable buffering in any reverse proxy in front of SkillClaw.
+
 ## Quick Reference
 
 **Operational model** — Every user has their own `skillclaw` process and `~/.skillclaw/config.yaml`. Each group maps to a `group_id`; one evolve server watches that namespace, turns sessions into skills, and writes them back. Joining a group only requires the correct sharing config on the client side.

@@ -60,6 +60,8 @@ class SkillClawConfig:
     # Which CLI agent to auto-configure on startup.
     claw_type: str = "openclaw"
     configure_openclaw: bool = True
+    configure_hermes: bool = False
+    hermes_config_path: str = ""
 
     # ------------------------------------------------------------------ #
     # LLM forwarding                                                      #

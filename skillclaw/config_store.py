@@ -13,6 +13,7 @@ from typing import Any
 
 from .chat_upstream import validate_fallbacks
 from .config import SkillClawConfig
+from .hermes_config import resolve_hermes_config
 
 CONFIG_DIR = Path.home() / ".skillclaw"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
@@ -57,6 +58,7 @@ _DEFAULTS: dict = {
     },
     "claw_type": "openclaw",
     "configure_openclaw": True,
+    "hermes": {"configure": False, "config_path": ""},
     "skills": {
         "enabled": True,
         "dir": str(_DEFAULT_SKILLS_DIR),
@@ -206,11 +208,11 @@ def _normalize_reload_interval(value: Any) -> int:
     return max(_MIN_SKILL_RELOAD_INTERVAL_SECONDS, interval)
 
 
-def default_skills_dir_for_claw(claw_type: str) -> Path:
+def default_skills_dir_for_claw(claw_type: str, hermes_config_path: str = "") -> Path:
     """Return the default local skills directory for the selected agent."""
     normalized = str(claw_type or "").strip().lower()
     if normalized == "hermes":
-        return _DEFAULT_HERMES_SKILLS_DIR
+        return resolve_hermes_config(hermes_config_path).parent / "skills"
     if normalized == "codex":
         return _DEFAULT_CODEX_SKILLS_DIR
     if normalized == "claude":
@@ -226,7 +228,7 @@ def default_llm_api_mode_for_claw(claw_type: str) -> str:
     return _DEFAULT_LLM_API_MODE_BY_CLAW.get(normalized, _FALLBACK_LLM_API_MODE)
 
 
-def resolve_skills_dir(skills_dir: Any, *, claw_type: str) -> str:
+def resolve_skills_dir(skills_dir: Any, *, claw_type: str, hermes_config_path: str = "") -> str:
     """Normalize a configured skills dir, applying agent-native defaults.
 
     Existing configs that still point at the old generic default are treated as
@@ -240,10 +242,10 @@ def resolve_skills_dir(skills_dir: Any, *, claw_type: str) -> str:
     if raw:
         expanded = Path(raw).expanduser()
         if normalized_claw in {"hermes", "codex", "claude", "opencode"} and expanded == generic_default:
-            return str(default_skills_dir_for_claw(normalized_claw))
+            return str(default_skills_dir_for_claw(normalized_claw, hermes_config_path))
         return str(expanded)
 
-    return str(default_skills_dir_for_claw(claw_type))
+    return str(default_skills_dir_for_claw(claw_type, hermes_config_path))
 
 
 def _default_served_model_name(llm_model_id: str) -> str:
@@ -358,6 +360,7 @@ class ConfigStore:
         skills_dir = resolve_skills_dir(
             skills.get("dir", str(_DEFAULT_SKILLS_DIR)),
             claw_type=raw_claw_type,
+            hermes_config_path=data.get("hermes", {}).get("config_path", ""),
         )
 
         return SkillClawConfig(
@@ -403,6 +406,8 @@ class ConfigStore:
             # Claw
             claw_type=raw_claw_type,
             configure_openclaw=configure_openclaw,
+            configure_hermes=bool(data.get("hermes", {}).get("configure", False)),
+            hermes_config_path=str(data.get("hermes", {}).get("config_path", "") or ""),
             # Sharing
             sharing_enabled=bool(sharing.get("enabled", False)),
             sharing_upload_sessions=bool(sharing.get("upload_sessions", True)),
@@ -479,6 +484,7 @@ class ConfigStore:
         effective_skills_dir = resolve_skills_dir(
             skills.get("dir", str(_DEFAULT_SKILLS_DIR)),
             claw_type=claw_type,
+            hermes_config_path=data.get("hermes", {}).get("config_path", ""),
         )
         lines = [
             f"claw_type:       {claw_type}",

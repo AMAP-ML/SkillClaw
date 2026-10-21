@@ -521,6 +521,14 @@ This setup shares session evidence and generated skills with the group. `group_i
 
 For Cloudflare R2, use the **account endpoint**, such as `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`, with `sharing.backend s3`, `sharing.bucket <bucket-name>`, and `sharing.region auto`. Do not append the bucket to `sharing.endpoint`: boto3 sends the bucket separately. SkillClaw rejects that configuration before making a storage request. See the [R2 S3 API documentation](https://developers.cloudflare.com/r2/api/s3/api/).
 
+### Hermes profiles and configuration consent
+
+Hermes configuration changes are disabled by default, including for existing minimal `claw_type: hermes` configurations. Run `skillclaw setup`, select the exact config file, and explicitly allow startup rewrites. Setup uses `HERMES_CONFIG`, then `HERMES_HOME/config.yaml`, then `~/.hermes/config.yaml` as its proposed path and saves the resolved selection in `hermes.config_path`; later environment changes do not redirect that selection. `hermes.configure: false` disables future rewrites.
+
+Setup can optionally import literal `model.base_url`, `model.default`, and `model.api_key` into SkillClaw before changing Hermes. Secret references, OAuth/provider-managed credentials, and an existing SkillClaw proxy endpoint need manual configuration. Review the proposed upstream fields. Default skills follow the selected config’s parent directory; explicitly configured skill paths remain unchanged.
+
+Backups and `skillclaw restore hermes` are scoped to the selected profile. Legacy global backups and backups for another profile are not restored automatically; inspect and copy those manually to the intended file. Repeated startup does not rewrite an already matching config.
+
 ### Optional chat upstream fallback
 
 Edit the active `config.yaml` to add up to three ordered OpenAI-compatible chat endpoints (the CLI does not support indexed `fallbacks[0]` assignments):

@@ -471,6 +471,14 @@ Bob 使用相同配置，只把 `sharing.local_root` 改为 `/Volumes/skillclaw-
 
 Cloudflare R2 应使用**账号级 endpoint**，例如 `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`，并配置 `sharing.backend s3`、`sharing.bucket <bucket-name>`、`sharing.region auto`。不要把 bucket 拼到 `sharing.endpoint` 后面；boto3 会单独发送 bucket。SkillClaw 会在访问存储前拒绝这种错误配置。参见 [R2 S3 API 文档](https://developers.cloudflare.com/r2/api/s3/api/)。
 
+### Hermes profile 与配置修改授权
+
+Hermes 配置修改默认关闭，只有 `claw_type: hermes` 的旧配置也不再自动改写文件。运行 `skillclaw setup`，选择明确的配置文件，并授权启动时改写。候选路径依次来自 `HERMES_CONFIG`、`HERMES_HOME/config.yaml`、`~/.hermes/config.yaml`；确认后的绝对路径保存到 `hermes.config_path`，后续环境变量改变不会转移目标。设置 `hermes.configure: false` 可关闭后续改写。
+
+setup 可选择先导入 Hermes 中的字面值 `model.base_url`、`model.default`、`model.api_key`，再展示上游配置供确认。环境变量/密钥引用、OAuth 或 provider 管理的凭据、已经指向 SkillClaw 的端点需手动填写。默认 skills 目录跟随所选配置的父目录，已有显式 skills 路径保持不变。
+
+备份和 `skillclaw restore hermes` 按所选 profile 隔离。旧的全局备份和其他 profile 的备份不会自动恢复，应核对后手动复制到正确目标。配置已匹配时重启不会再次改写。
+
 ### 可选：Chat 上游故障切换
 
 在当前 `config.yaml` 的 `llm` 下配置最多三个按顺序尝试的 OpenAI-compatible Chat 备用端点。CLI 不支持 `fallbacks[0]` 这种索引赋值，请编辑 YAML：

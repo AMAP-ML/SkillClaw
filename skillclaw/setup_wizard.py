@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .claw_adapter import CLAW_TYPES
 from .config_store import CONFIG_DIR, ConfigStore, default_llm_api_mode_for_claw, resolve_skills_dir
+from .hermes_config import import_hermes_upstream, resolve_hermes_config
 
 _PROVIDER_PRESETS = {
     "kimi": {
@@ -141,9 +142,33 @@ class SetupWizard:
             default=current_claw,
         )
 
+        hermes_config = dict(existing.get("hermes", {}))
+        imported_llm = {}
+        if claw_type == "hermes":
+            selected = str(
+                resolve_hermes_config(
+                    _prompt(
+                        "Hermes config file (only this profile can be modified)",
+                        default=str(resolve_hermes_config(hermes_config.get("config_path", ""))),
+                    )
+                )
+            )
+            hermes_config = {
+                "config_path": selected,
+                "configure": _prompt_bool(
+                    f"Allow SkillClaw startup to rewrite {selected}",
+                    default=False,
+                ),
+            }
+            if _prompt_bool("Import literal upstream settings from this Hermes config", default=False):
+                try:
+                    imported_llm = import_hermes_upstream(Path(selected), existing.get("proxy", {}).get("port", 30000))
+                except (OSError, ValueError) as exc:
+                    print(f"Import skipped: {exc}. Enter upstream settings below.")
+
         # ---- LLM provider ----
         print("\n--- LLM Configuration ---")
-        current_llm = existing.get("llm", {})
+        current_llm = imported_llm or existing.get("llm", {})
         current_provider = current_llm.get("provider", "custom")
         provider = _prompt_choice(
             "LLM provider",
@@ -225,6 +250,7 @@ class SetupWizard:
         default_skills_dir = resolve_skills_dir(
             current_skills.get("dir", str(CONFIG_DIR / "skills")),
             claw_type=claw_type,
+            hermes_config_path=hermes_config.get("config_path", ""),
         )
         if claw_type == "hermes":
             print(
@@ -403,6 +429,7 @@ class SetupWizard:
             llm_api_mode = default_api_mode
         data = {
             "claw_type": claw_type,
+            "hermes": hermes_config,
             "llm": {
                 "provider": provider,
                 "fallbacks": current_llm.get("fallbacks", []),

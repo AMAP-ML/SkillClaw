@@ -477,8 +477,11 @@ def restore_hermes(backup_path: str | None):
     from .claw_adapter import restore_hermes_config
 
     try:
-        result = restore_hermes_config(Path(backup_path).expanduser() if backup_path else None)
-    except FileNotFoundError as exc:
+        result = restore_hermes_config(
+            Path(backup_path).expanduser() if backup_path else None,
+            config_path=ConfigStore().to_skillclaw_config().hermes_config_path,
+        )
+    except (FileNotFoundError, ValueError) as exc:
         raise click.ClickException(str(exc)) from None
 
     click.echo(f"Restored Hermes config: {result['target']} <- {result['source']}")

@@ -721,10 +721,12 @@ class SkillHub:
                 backup_dir="",
             )
 
-        os.makedirs(staging_dir, exist_ok=True)
         resolved_targets: dict[str, str] = {}
+        staging_ready = False
 
         try:
+            os.makedirs(staging_dir, exist_ok=True)
+            staging_ready = True
             for name, rec in manifest.items():
                 category = str(rec.get("category", "general") or "general")
                 target_dir = self._resolve_pull_target_dir(
@@ -781,16 +783,18 @@ class SkillHub:
                 self._remove_duplicate_local_skill_dirs(name, dst_dir, local_dirs_by_name)
 
         except Exception as e:
-            logger.warning("[SkillHub] mirror pull failed, restoring backup: %s", e)
-            try:
-                if os.path.isdir(skills_dir):
-                    shutil.rmtree(skills_dir)
-                shutil.copytree(backup_dir, skills_dir, symlinks=True)
-                restored_from_backup = True
-                logger.info("[SkillHub] local skills restored from backup: %s", backup_dir)
-            except Exception as restore_err:
-                logger.error("[SkillHub] backup restore failed: %s", restore_err)
-            self._prune_backups(backup_root, backup_prefix, keep=3)
+            logger.warning("[SkillHub] mirror pull failed: %s", e)
+            # A failed staging mkdir has not touched the local library. Do not
+            # delete it just to restore the identical backup on a failing disk.
+            if staging_ready:
+                try:
+                    if os.path.isdir(skills_dir):
+                        shutil.rmtree(skills_dir)
+                    shutil.copytree(backup_dir, skills_dir, symlinks=True)
+                    restored_from_backup = True
+                    logger.info("[SkillHub] local skills restored from backup: %s", backup_dir)
+                except Exception as restore_err:
+                    logger.error("[SkillHub] backup restore failed: %s", restore_err)
             return _result(
                 downloaded=0,
                 skipped=0,
@@ -802,6 +806,7 @@ class SkillHub:
         finally:
             if os.path.isdir(staging_dir):
                 shutil.rmtree(staging_dir, ignore_errors=True)
+            self._prune_backups(backup_root, backup_prefix, keep=3)
 
         logger.info(
             "[SkillHub] pull complete: %d downloaded, %d skipped, %d deleted, %d total remote",
@@ -810,7 +815,6 @@ class SkillHub:
             deleted,
             len(manifest),
         )
-        self._prune_backups(backup_root, backup_prefix, keep=3)
         return _result(
             downloaded=downloaded,
             skipped=skipped,

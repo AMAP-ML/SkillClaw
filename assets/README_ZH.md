@@ -491,6 +491,12 @@ llm:
 
 整个请求最多尝试六次，并共享现有 `SKILLCLAW_LLM_REQUEST_TIMEOUT_S` 总时限（包括退避和 Retry-After）。最后一个端点的长配额窗口会快速失败。原生 Responses、Bedrock 和独立 evolve-server 的 LLM 调用不使用该列表。修改后重启代理。
 
+### Chat 实时流式输出
+
+OpenAI-compatible `/v1/chat/completions` 的 `stream: true` 现在会实时转发增量，包括独立的 `reasoning_content` 和结构化工具调用分片。完成后只记录一次会话回合；客户端取消、上游错误或不完整流会关闭上游连接，不记录成功回合。仅在成功开启上游流之前允许故障切换，输出后不重放请求。HTTP 响应头发出后的错误以 SSE `error` 对象返回，不发送 `[DONE]`。
+
+流式请求需要上游提供 OpenAI 结构化工具调用；文本工具标签修复仅用于非流式请求。Bedrock、Chat 转 Anthropic/Responses 路径维持原有行为。SkillClaw 前面若有反向代理，需关闭响应缓冲。
+
 ## 快速参考
 
 **运行关系** — 每个用户有自己的 `skillclaw` 进程和 `~/.skillclaw/config.yaml`；每个群组对应一个 `group_id`，由一个 Evolver 持续读取会话、产出技能、写回存储。加入群组只需正确配置共享存储，无需部署服务端。

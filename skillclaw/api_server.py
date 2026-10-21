@@ -745,6 +745,7 @@ def _assemble_streaming_chat_completion(
                 {
                     "role": "assistant",
                     "content_parts": [],
+                    "reasoning_parts": [],
                     "tool_calls": {},
                     "finish_reason": None,
                 },
@@ -753,6 +754,8 @@ def _assemble_streaming_chat_completion(
             if isinstance(delta.get("role"), str):
                 entry["role"] = delta["role"]
 
+            if isinstance(delta.get("reasoning_content"), str):
+                entry["reasoning_parts"].append(delta["reasoning_content"])
             content = delta.get("content")
             if isinstance(content, str):
                 entry["content_parts"].append(content)
@@ -794,6 +797,8 @@ def _assemble_streaming_chat_completion(
             "role": entry["role"],
             "content": "".join(entry["content_parts"]),
         }
+        if entry["reasoning_parts"]:
+            message["reasoning_content"] = "".join(entry["reasoning_parts"])
         if entry["tool_calls"]:
             message["tool_calls"] = [entry["tool_calls"][i] for i in sorted(entry["tool_calls"])]
         choices.append(
@@ -1604,6 +1609,14 @@ class SkillClawAPIServer:
             # X-Session-Done or body session_done trigger session close.
 
             stream = bool(body.get("stream", False))
+            if stream and owner.config.llm_provider != "bedrock":
+                if not isinstance(body.get("messages"), list) or not body["messages"]:
+                    raise HTTPException(status_code=400, detail="messages must be a non-empty list")
+                return StreamingResponse(
+                    owner._stream_chat_and_track(body, session_id, turn_type, session_done),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
             result = await owner._handle_request(
                 body,
                 session_id=session_id,
@@ -2313,6 +2326,7 @@ class SkillClawAPIServer:
         session_id: str,
         turn_type: str,
         session_done: bool,
+        forwarder=None,
     ) -> dict[str, Any]:
         protocol = str(body.get("_skillclaw_protocol") or "").strip()
         messages = body.get("messages")
@@ -2396,12 +2410,13 @@ class SkillClawAPIServer:
 
         forward_body = {k: v for k, v in body.items() if k not in _NON_STANDARD_BODY_KEYS}
         forward_body["stream"] = False
-        forward_body.pop("stream_options", None)
+        if not forwarder:
+            forward_body.pop("stream_options", None)
         if "model" not in forward_body:
             forward_body["model"] = self._served_model
         forward_body["messages"] = messages  # potentially skill-injected
 
-        output = await self._forward_to_llm(forward_body)
+        output = await (forwarder or self._forward_to_llm)(forward_body)
         output["model"] = forward_body.get("model") or self._served_model
 
         choice = output.get("choices", [{}])[0]
@@ -2422,7 +2437,7 @@ class SkillClawAPIServer:
 
         # Upstream models sometimes emit tool calls as text tags instead of
         # structured `message.tool_calls`; parse and normalize both sources.
-        clean_content, text_tool_calls = _extract_tool_calls_from_text(content)
+        clean_content, text_tool_calls = (content, []) if forwarder else _extract_tool_calls_from_text(content)
         if text_tool_calls:
             content = clean_content
             tool_calls.extend(text_tool_calls)
@@ -2542,6 +2557,49 @@ class SkillClawAPIServer:
     # ------------------------------------------------------------------ #
     # LLM forwarding                                                       #
     # ------------------------------------------------------------------ #
+
+    async def _stream_chat_and_track(self, body, session_id, turn_type, session_done):
+        from .chat_stream import chat_events
+        from .chat_upstream import forward_chat
+
+        queue = asyncio.Queue(maxsize=16)
+
+        async def forward(prepared):
+            async def collect(response, model):
+                events = []
+                async for event in chat_events(response):
+                    events.append(event)
+                    outgoing = dict(event, model=body.get("model") or self._served_model, session_id=session_id)
+                    await queue.put(outgoing)
+                return _assemble_streaming_chat_completion(events, fallback_model=model)
+
+            return await forward_chat(
+                self.config, prepared, timeout=_llm_request_timeout_seconds(), collect_stream=collect, stream=True
+            )
+
+        async def produce():
+            try:
+                await self._handle_request(body, session_id, turn_type, session_done, forwarder=forward)
+            except Exception as exc:
+                status = exc.status_code if isinstance(exc, HTTPException) else 500
+                await queue.put({"error": {"message": "Chat stream failed", "type": "upstream_error", "code": status}})
+                await queue.put(False)
+            else:
+                await queue.put(True)
+
+        producer = asyncio.create_task(produce())
+        try:
+            while True:
+                item = await queue.get()
+                if isinstance(item, bool):
+                    if item:
+                        yield "data: [DONE]\n\n"
+                    break
+                yield "data: " + json.dumps(item, ensure_ascii=False) + "\n\n"
+        finally:
+            if not producer.done():
+                producer.cancel()
+            await asyncio.gather(producer, return_exceptions=True)
 
     async def _forward_to_llm(self, body: dict[str, Any]) -> dict[str, Any]:
         """Forward to a real LLM API.

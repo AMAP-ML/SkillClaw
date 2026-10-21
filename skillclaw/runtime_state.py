@@ -35,14 +35,31 @@ def _process_alive_unix(pid: int) -> bool:
 
 def _process_alive_windows(pid: int) -> bool:
     import ctypes
+    from ctypes import wintypes
 
-    kernel32 = ctypes.windll.kernel32
-    PROCESS_QUERY_INFORMATION = 0x0400
-    handle = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, False, pid)
-    if handle:
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    SYNCHRONIZE = 0x00100000
+    WAIT_OBJECT_0 = 0
+    ERROR_INVALID_PARAMETER = 87
+    handle = kernel32.OpenProcess(SYNCHRONIZE, False, pid)
+    if not handle:
+        # Only a nonexistent PID proves death; other inspection failures must
+        # not permit lock reclamation.
+        return ctypes.get_last_error() != ERROR_INVALID_PARAMETER
+    try:
+        # An exited process can still be opened while another handle retains its
+        # kernel object. Only a signaled process handle proves termination; a
+        # timeout or failed wait must not allow a live daemon's lock to be stolen.
+        return kernel32.WaitForSingleObject(handle, 0) != WAIT_OBJECT_0
+    finally:
         kernel32.CloseHandle(handle)
-        return True
-    return False
 
 
 _USE_WINDOWS = platform.system() == "Windows"

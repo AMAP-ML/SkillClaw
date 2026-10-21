@@ -565,6 +565,7 @@ skillclaw skills list-remote   # browse shared skills
 **Config reference**
 
 - Client config: `~/.skillclaw/config.yaml` (created by `skillclaw setup`)
+- Evidence age window: set `EVOLVE_EVIDENCE_MAX_AGE_SECONDS` on the evolve server (e.g. `604800` for seven days; default `0` disables filtering). Both engines exclude stale, future, missing or invalid timestamps and retain those objects for review. This uses artifact upload timestamps, not original turn time; it does not expire existing skills or guarantee improvement.
 - Server template: [`evolve_server/evolve_server.env.example`](./evolve_server/evolve_server.env.example) (copy to `.env` to use)
 - Inspect / update config: `skillclaw config show` | `skillclaw config <key> <value>`
 - Repo entry points for contributors: `skillclaw/` (client), `evolve_server/` (backend), `scripts/` (installers)

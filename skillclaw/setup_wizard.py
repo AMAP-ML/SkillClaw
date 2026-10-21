@@ -400,6 +400,7 @@ class SetupWizard:
             "claw_type": claw_type,
             "llm": {
                 "provider": provider,
+                "fallbacks": current_llm.get("fallbacks", []),
                 "model_id": model_id,
                 "api_base": api_base,
                 "api_key": api_key,

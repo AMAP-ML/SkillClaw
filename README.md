@@ -519,6 +519,26 @@ This setup shares session evidence and generated skills with the group. `group_i
 
 For Cloudflare R2, use the **account endpoint**, such as `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`, with `sharing.backend s3`, `sharing.bucket <bucket-name>`, and `sharing.region auto`. Do not append the bucket to `sharing.endpoint`: boto3 sends the bucket separately. SkillClaw rejects that configuration before making a storage request. See the [R2 S3 API documentation](https://developers.cloudflare.com/r2/api/s3/api/).
 
+### Optional chat upstream fallback
+
+Edit the active `config.yaml` to add up to three ordered OpenAI-compatible chat endpoints (the CLI does not support indexed `fallbacks[0]` assignments):
+
+```yaml
+llm:
+  provider: custom
+  api_base: https://primary.example/v1
+  api_key: <primary-key>
+  model_id: primary-model
+  fallbacks:
+    - api_base: https://backup.example/v1
+      api_key: <separate-backup-key>
+      model_id: backup-model
+```
+
+On a connection failure or HTTP 408/429/500/502/503/504, the proxy tries the next endpoint immediately. Other HTTP errors fail without replaying the request elsewhere; supported temperature/stream compatibility retries remain bounded. Each fallback uses its own key (omitting it means unauthenticated), model, and optional `provider: openrouter`; keys never inherit from the primary. All endpoints must be trusted recipients of the same request content.
+
+The entire operation has six attempts and the existing `SKILLCLAW_LLM_REQUEST_TIMEOUT_S` time budget, including backoff and `Retry-After`. Long final quota windows fail promptly. Native Responses and Bedrock forwarding, and the standalone evolve-server LLM client, do not use this list. Restart the proxy after editing configuration.
+
 ## Quick Reference
 
 **Operational model** — Every user has their own `skillclaw` process and `~/.skillclaw/config.yaml`. Each group maps to a `group_id`; one evolve server watches that namespace, turns sessions into skills, and writes them back. Joining a group only requires the correct sharing config on the client side.

@@ -462,6 +462,61 @@ skillclaw-evolve-server --engine agent --port 8787 --interval 300 --no-fresh \
 
 Only the server operator needs `openclaw` for `--engine agent`.
 
+### Example: a shared LAN server and two clients
+
+Use one server/NAS directory for shared artifacts, and keep a local proxy and local skills directory on each client. For example:
+
+| Machine | Shared storage path on that machine | Role |
+|---------|-------------------------------------|------|
+| Server | `/srv/skillclaw-share` | Exports the directory via SMB/NFS; runs one evolver for `team-lan` |
+| Alice's computer | `/mnt/skillclaw-share` | Mounts that export; runs Alice's agent and proxy |
+| Bob's computer | `/Volumes/skillclaw-share` | Mounts the same export; runs Bob's agent and proxy |
+
+These paths must refer to **the same mounted storage**, not three unrelated local directories. Mount the export using your OS's SMB/NFS tools before starting SkillClaw, and verify all three machines can read, write, rename, and delete a temporary file there. `sharing.local_root` is a filesystem path, not an HTTP URL. Keep `skills.dir` on each client's local disk, separate from the shared root.
+
+On the server, install the server dependencies above and configure an upstream API key/model that the evolver can call. In a Bash-compatible shell:
+
+```bash
+export OPENAI_BASE_URL="https://your-provider.example/v1"
+export OPENAI_API_KEY="<server-api-key>"
+export EVOLVE_MODEL="<model-id>"
+export EVOLVE_LLM_MAX_TOKENS=8192  # adjust to the model's supported output limit
+mkdir -p ~/skillclaw-team-lan
+cd ~/skillclaw-team-lan
+skillclaw-evolve-server --engine workflow --interval 300 \
+  --storage-backend local --local-root /srv/skillclaw-share --group-id team-lan
+```
+
+Run one evolver per group. The dedicated working directory keeps its history and processed-session state separate from other groups. This example uses periodic processing; omitting `--port` leaves the HTTP trigger server disabled.
+
+On **each client**, install the client, run `skillclaw setup` to choose the local agent and upstream LLM, then configure the mounted share. For Alice:
+
+```bash
+skillclaw config proxy.host 127.0.0.1
+skillclaw config sharing.enabled true
+skillclaw config sharing.backend local
+skillclaw config sharing.skill_backend local
+skillclaw config sharing.session_backend local
+skillclaw config sharing.local_root /mnt/skillclaw-share
+skillclaw config sharing.group_id team-lan
+skillclaw config sharing.user_alias alice
+skillclaw config sharing.auto_pull_on_start true
+skillclaw config sharing.skill_reload_mode poll
+skillclaw config sharing.skill_reload_interval_seconds 30
+skillclaw config evolve.server_url ""
+skillclaw start --daemon
+```
+
+Bob uses the same settings with `sharing.local_root /Volumes/skillclaw-share` and `sharing.user_alias bob`. Each agent connects to its **own** `http://127.0.0.1:30000/v1` proxy. If a proxy was already running, restart it after changing configuration. Client upstream credentials and server upstream credentials are configured separately.
+
+To verify the loop:
+
+1. On one client, back up the local skills directory, then run `skillclaw skills push` to seed the group's skills. On the other, run `skillclaw skills list-remote` and `skillclaw skills pull`. The default full pull mirrors the shared manifest and can remove local-only skills, so seed/review the shared library before enabling it on an existing library.
+2. Use the agent through its local proxy. After session finalization (the default idle timeout is 180 seconds), confirm a session artifact reaches `team-lan/sessions/` in the share. The evolver may consume it on the next cycle.
+3. Inspect server logs and `evolve_history.jsonl` after a processing cycle. Evolution depends on usable evidence and is not guaranteed to create a new skill every cycle. Accepted changes appear under `team-lan/skills/`; each client's poll then pulls them locally.
+
+This setup shares session evidence and generated skills with the group. `group_id` is a namespace, not an access-control boundary; use filesystem/share permissions and separate roots for different trust groups. Automated privacy redaction is not provided by this setup. The default publish mode is `direct`; use the `validated` flow above if clients should review candidates before publication.
+
 ## Quick Reference
 
 **Operational model** — Every user has their own `skillclaw` process and `~/.skillclaw/config.yaml`. Each group maps to a `group_id`; one evolve server watches that namespace, turns sessions into skills, and writes them back. Joining a group only requires the correct sharing config on the client side.

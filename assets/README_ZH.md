@@ -412,6 +412,61 @@ skillclaw-evolve-server --engine agent --port 8787 --interval 300 --no-fresh \
 
 只有服务端操作员在使用 `--engine agent` 时才需要 `openclaw`。
 
+### 示例：一台局域网服务器，两台客户端
+
+共享会话和技能放在服务器/NAS 上；每台客户端保留自己的代理和本地技能目录。例如：
+
+| 机器 | 该机器看到的共享目录 | 职责 |
+|------|--------------------|------|
+| 服务器 | `/srv/skillclaw-share` | 通过 SMB/NFS 共享目录，为 `team-lan` 运行一个 evolver |
+| Alice 的电脑 | `/mnt/skillclaw-share` | 挂载上述共享，运行自己的 agent 和代理 |
+| Bob 的电脑 | `/Volumes/skillclaw-share` | 挂载同一共享，运行自己的 agent 和代理 |
+
+三个路径必须指向**同一份共享存储**，不是各自在本地创建同名文件夹。启动前使用操作系统的 SMB/NFS 工具挂载，验证三台机器能在其中读、写、重命名和删除测试文件。`sharing.local_root` 是文件系统路径，不是 HTTP 地址。各客户端的 `skills.dir` 保留在本机，与共享根目录分开。
+
+服务器按上文安装服务端依赖，然后配置 evolver 可以调用的上游模型。在 Bash 兼容终端运行：
+
+```bash
+export OPENAI_BASE_URL="https://your-provider.example/v1"
+export OPENAI_API_KEY="<服务器使用的 API key>"
+export EVOLVE_MODEL="<模型 ID>"
+export EVOLVE_LLM_MAX_TOKENS=8192  # 按模型支持的输出上限调整
+mkdir -p ~/skillclaw-team-lan
+cd ~/skillclaw-team-lan
+skillclaw-evolve-server --engine workflow --interval 300 \
+  --storage-backend local --local-root /srv/skillclaw-share --group-id team-lan
+```
+
+每组运行一个 evolver。独立工作目录用于隔离各组的演化历史和已处理会话记录。本例靠定时轮询工作，省略 `--port`，因此不启动 HTTP 触发服务。
+
+**每台客户端**安装客户端并运行 `skillclaw setup`，选择本机 agent 和上游模型，再配置挂载目录。Alice 的示例：
+
+```bash
+skillclaw config proxy.host 127.0.0.1
+skillclaw config sharing.enabled true
+skillclaw config sharing.backend local
+skillclaw config sharing.skill_backend local
+skillclaw config sharing.session_backend local
+skillclaw config sharing.local_root /mnt/skillclaw-share
+skillclaw config sharing.group_id team-lan
+skillclaw config sharing.user_alias alice
+skillclaw config sharing.auto_pull_on_start true
+skillclaw config sharing.skill_reload_mode poll
+skillclaw config sharing.skill_reload_interval_seconds 30
+skillclaw config evolve.server_url ""
+skillclaw start --daemon
+```
+
+Bob 使用相同配置，只把 `sharing.local_root` 改为 `/Volumes/skillclaw-share`，把 `sharing.user_alias` 改为 `bob`。两人的 agent 都连接**各自本机**的 `http://127.0.0.1:30000/v1`。如果代理已在运行，改完配置后需重启。客户端和服务器的上游凭据分别配置。
+
+验证闭环：
+
+1. 先备份客户端本地技能目录，由一台客户端运行 `skillclaw skills push` 初始化共享技能库；另一台运行 `skillclaw skills list-remote` 和 `skillclaw skills pull`。默认完整拉取会镜像共享清单，可能删除仅存在于本地的技能，因此已有技能库应先整理、上传，再启用自动拉取。
+2. 经本地代理使用 agent。会话结束后（默认空闲超时为 180 秒），确认共享目录的 `team-lan/sessions/` 中出现会话文件；evolver 可能在下一轮处理时将其取走。
+3. 查看服务器日志和 `evolve_history.jsonl`。是否产生技能更新取决于证据质量，并非每轮必然更新。接受的变化写入 `team-lan/skills/`，客户端轮询后拉取到本地。
+
+同组用户共享会话证据和生成的技能。`group_id` 只是命名空间，不是权限隔离；不同信任组应使用独立共享根目录和文件系统/共享访问权限。本例没有自动隐私脱敏。默认发布模式为 `direct`；若需先让客户端验证候选技能，请使用上文的 `validated` 流程。
+
 ## 快速参考
 
 **运行关系** — 每个用户有自己的 `skillclaw` 进程和 `~/.skillclaw/config.yaml`；每个群组对应一个 `group_id`，由一个 Evolver 持续读取会话、产出技能、写回存储。加入群组只需正确配置共享存储，无需部署服务端。

@@ -23,6 +23,7 @@ it in ``_ADAPTERS``.
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -34,6 +35,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 import yaml
+
+from .hermes_config import load_hermes_mapping, resolve_hermes_config
 
 if TYPE_CHECKING:
     from .config import SkillClawConfig
@@ -426,20 +429,25 @@ def _prepare_external_skills_dir(target_dir: Path, label: str) -> None:
         )
 
 
+def _hermes_backup_dir(config_path: Path) -> Path:
+    digest = hashlib.sha256(str(config_path.resolve()).encode("utf-8")).hexdigest()
+    return _HERMES_BACKUP_DIR / digest
+
+
 def _backup_hermes_config_if_changed(config_path: Path, new_text: str) -> Path | None:
     """Save the current Hermes config before overwriting it, if it changed."""
     return _backup_text_file_if_changed(
         config_path,
         new_text,
-        backup_dir=_HERMES_BACKUP_DIR,
+        backup_dir=_hermes_backup_dir(config_path),
         backup_stem="config",
         backup_suffix="yaml",
         label="Hermes config",
     )
 
 
-def _latest_hermes_backup_path() -> Path | None:
-    return _latest_backup_path(_HERMES_BACKUP_DIR, "config", "yaml")
+def _latest_hermes_backup_path(config_path: Path) -> Path | None:
+    return _latest_backup_path(_hermes_backup_dir(config_path), "config", "yaml")
 
 
 def _write_json_mapping_atomic(path: Path, data: dict, label: str) -> None:
@@ -470,14 +478,17 @@ def _write_json_mapping_atomic(path: Path, data: dict, label: str) -> None:
 
 
 def _configure_hermes(cfg: "SkillClawConfig") -> None:
-    """Auto-configure Hermes to route model traffic through SkillClaw."""
-    config_path = _HERMES_HOME / "config.yaml"
+    """Configure only the profile explicitly selected and authorized by the user."""
+    if not cfg.configure_hermes or not cfg.hermes_config_path:
+        logger.info("[ClawAdapter] Hermes auto-configuration disabled; select and authorize a profile in setup")
+        return
+    if cfg.llm_provider != "bedrock" and (not cfg.llm_api_base or not cfg.llm_model_id):
+        raise ValueError("Configure SkillClaw upstream URL and model before rewriting Hermes")
+    config_path = resolve_hermes_config(cfg.hermes_config_path)
     model_id = cfg.served_model_name or cfg.llm_model_id or "skillclaw-model"
     api_key = cfg.proxy_api_key or "skillclaw"
     base_url = f"http://127.0.0.1:{cfg.proxy_port}/v1"
-    _prepare_hermes_skills_dir(cfg)
-
-    data = _load_yaml_mapping(config_path, "Hermes")
+    data = load_hermes_mapping(config_path)
     model = data.get("model")
     if not isinstance(model, dict):
         model = {"default": model} if isinstance(model, str) and model.strip() else {}
@@ -490,19 +501,25 @@ def _configure_hermes(cfg: "SkillClawConfig") -> None:
     model["api_mode"] = ""
 
     data["model"] = model
-    _backup_hermes_config_if_changed(config_path, _yaml_mapping_to_text(data))
-    _write_yaml_mapping_atomic(config_path, data, "Hermes")
+    new_text = _yaml_mapping_to_text(data)
+    if config_path.read_text(encoding="utf-8") != new_text:
+        if _backup_hermes_config_if_changed(config_path, new_text) is None:
+            raise OSError("Cannot back up selected Hermes config; refusing to overwrite it")
+        _write_yaml_mapping_atomic(config_path, data, "Hermes")
+    _prepare_hermes_skills_dir(cfg)
 
 
 def inspect_hermes_config(cfg: "SkillClawConfig") -> dict[str, object]:
     """Return a diagnostic snapshot of the local Hermes integration state."""
-    config_path = _HERMES_HOME / "config.yaml"
+    config_path = resolve_hermes_config(cfg.hermes_config_path)
     expected_model = cfg.served_model_name or cfg.llm_model_id or "skillclaw-model"
     expected_base_url = f"http://127.0.0.1:{cfg.proxy_port}/v1"
     expected_api_key = cfg.proxy_api_key or "skillclaw"
-    expected_skills_dir = Path(str(getattr(cfg, "skills_dir", "") or _HERMES_SKILLS_DIR)).expanduser()
+    expected_skills_dir = Path(
+        str(getattr(cfg, "skills_dir", "") or resolve_hermes_config(cfg.hermes_config_path).parent / "skills")
+    ).expanduser()
 
-    data = _load_yaml_mapping(config_path, "Hermes")
+    data = load_hermes_mapping(config_path) if config_path.exists() else {}
     model = data.get("model") if isinstance(data, dict) else {}
     if not isinstance(model, dict):
         model = {"default": model} if isinstance(model, str) and model else {}
@@ -512,7 +529,7 @@ def inspect_hermes_config(cfg: "SkillClawConfig") -> dict[str, object]:
     configured_default = str(model.get("default", "") or "")
     configured_api_key = str(model.get("api_key", "") or "")
 
-    backup_path = _latest_hermes_backup_path()
+    backup_path = _latest_hermes_backup_path(config_path)
     proxy_match = (
         configured_provider == "custom"
         and configured_base_url == expected_base_url
@@ -520,7 +537,7 @@ def inspect_hermes_config(cfg: "SkillClawConfig") -> dict[str, object]:
         and configured_api_key == expected_api_key
     )
     legacy_present = _LEGACY_SKILLCLAW_SKILLS_DIR.is_dir()
-    uses_default_skills_dir = expected_skills_dir == _HERMES_SKILLS_DIR
+    uses_default_skills_dir = expected_skills_dir == config_path.parent / "skills"
     issues: list[str] = []
     notes: list[str] = [
         "This integration only rewrites Hermes-local config and does not touch other claw adapters.",
@@ -530,10 +547,10 @@ def inspect_hermes_config(cfg: "SkillClawConfig") -> dict[str, object]:
     next_steps: list[str] = []
 
     if not config_path.exists():
-        issues.append("Hermes config is missing: ~/.hermes/config.yaml")
+        issues.append(f"Hermes config is missing: {config_path}")
     if not proxy_match:
         issues.append("Hermes model routing is not pointing at the local SkillClaw proxy.")
-        next_steps.append("Start SkillClaw once so it can rewrite ~/.hermes/config.yaml.")
+        next_steps.append("Run skillclaw setup to select and authorize this Hermes profile, or route it manually.")
     if not expected_skills_dir.is_dir():
         issues.append(f"Hermes skills directory is missing: {expected_skills_dir}")
         next_steps.append(f"Create or prepare the Hermes skills directory: {expected_skills_dir}")
@@ -571,24 +588,26 @@ def inspect_hermes_config(cfg: "SkillClawConfig") -> dict[str, object]:
     }
 
 
-def restore_hermes_config(backup_path: Path | None = None) -> dict[str, str]:
-    """Restore ~/.hermes/config.yaml from the latest or a specified backup."""
-    source = Path(backup_path).expanduser() if backup_path is not None else _latest_hermes_backup_path()
+def restore_hermes_config(backup_path: Path | None = None, *, config_path: str = "") -> dict[str, str]:
+    """Restore only a backup associated with the selected profile."""
+    target = resolve_hermes_config(config_path)
+    source = Path(backup_path).expanduser().resolve() if backup_path else _latest_hermes_backup_path(target)
     if source is None or not source.exists():
-        raise FileNotFoundError("No Hermes backup found")
-
-    text = source.read_text(encoding="utf-8")
-    target = _HERMES_HOME / "config.yaml"
-    _write_text_atomic(target, text, "Hermes config restore")
+        raise FileNotFoundError(f"No profile-scoped Hermes backup found for {target}")
+    if source.resolve().parent != _hermes_backup_dir(target).resolve():
+        raise ValueError("Backup belongs to a different or legacy Hermes profile; restore it manually after checking")
+    _write_text_atomic(target, source.read_text(encoding="utf-8"), "Hermes config restore")
     return {"source": str(source), "target": str(target)}
 
 
 def _prepare_hermes_skills_dir(cfg: "SkillClawConfig") -> None:
     """Prepare the Hermes-local skill directory without touching other agents."""
-    target_dir = Path(str(getattr(cfg, "skills_dir", "") or _HERMES_SKILLS_DIR)).expanduser()
+    target_dir = Path(
+        str(getattr(cfg, "skills_dir", "") or resolve_hermes_config(cfg.hermes_config_path).parent / "skills")
+    ).expanduser()
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    if target_dir != _HERMES_SKILLS_DIR:
+    if target_dir != resolve_hermes_config(cfg.hermes_config_path).parent / "skills":
         logger.info(
             "[ClawAdapter] Hermes uses custom skills dir: %s",
             target_dir,

@@ -467,6 +467,26 @@ Bob 使用相同配置，只把 `sharing.local_root` 改为 `/Volumes/skillclaw-
 
 同组用户共享会话证据和生成的技能。`group_id` 只是命名空间，不是权限隔离；不同信任组应使用独立共享根目录和文件系统/共享访问权限。本例没有自动隐私脱敏。默认发布模式为 `direct`；若需先让客户端验证候选技能，请使用上文的 `validated` 流程。
 
+### 可选：Chat 上游故障切换
+
+在当前 `config.yaml` 的 `llm` 下配置最多三个按顺序尝试的 OpenAI-compatible Chat 备用端点。CLI 不支持 `fallbacks[0]` 这种索引赋值，请编辑 YAML：
+
+```yaml
+llm:
+  provider: custom
+  api_base: https://primary.example/v1
+  api_key: <主端点 key>
+  model_id: primary-model
+  fallbacks:
+    - api_base: https://backup.example/v1
+      api_key: <备用端点自己的 key>
+      model_id: backup-model
+```
+
+连接失败或 HTTP 408/429/500/502/503/504 时立即尝试下一端点；其他 HTTP 错误不会把请求重放到别处。兼容性的 temperature/stream 重试也计入上限。备用端点使用自己的 key、模型和可选的 `provider: openrouter`，不继承主端点凭据；省略 key 表示不鉴权。所有备用端点都必须是允许接收这份请求内容的服务。
+
+整个请求最多尝试六次，并共享现有 `SKILLCLAW_LLM_REQUEST_TIMEOUT_S` 总时限（包括退避和 Retry-After）。最后一个端点的长配额窗口会快速失败。原生 Responses、Bedrock 和独立 evolve-server 的 LLM 调用不使用该列表。修改后重启代理。
+
 ## 快速参考
 
 **运行关系** — 每个用户有自己的 `skillclaw` 进程和 `~/.skillclaw/config.yaml`；每个群组对应一个 `group_id`，由一个 Evolver 持续读取会话、产出技能、写回存储。加入群组只需正确配置共享存储，无需部署服务端。

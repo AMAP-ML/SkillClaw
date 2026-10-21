@@ -3,7 +3,7 @@
 Unified configuration for SkillClaw.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -64,6 +64,7 @@ class SkillClawConfig:
     # ------------------------------------------------------------------ #
     # LLM forwarding                                                      #
     # ------------------------------------------------------------------ #
+    llm_fallbacks: list[dict] = field(default_factory=list)
     llm_provider: str = "openai"
     llm_api_base: str = ""
     llm_api_key: str = ""

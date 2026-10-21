@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from .chat_upstream import validate_fallbacks
 from .config import SkillClawConfig
 
 CONFIG_DIR = Path.home() / ".skillclaw"
@@ -42,6 +43,7 @@ def _resolve_config_file(config_file: Path | None = None) -> Path:
 
 _DEFAULTS: dict = {
     "llm": {
+        "fallbacks": [],
         "provider": "custom",
         "model_id": "",
         "api_base": "",
@@ -364,6 +366,7 @@ class ConfigStore:
             llm_api_key=llm_api_key,
             llm_model_id=llm_model_id,
             llm_api_mode=llm_api_mode,
+            llm_fallbacks=validate_fallbacks(llm.get("fallbacks", [])),
             bedrock_region=llm.get("bedrock_region") or data.get("bedrock_region", "us-east-1"),
             llm_region=str(llm.get("region", "") or ""),
             # OpenRouter

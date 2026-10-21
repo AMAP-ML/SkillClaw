@@ -2869,126 +2869,19 @@ class SkillClawAPIServer:
             raise HTTPException(status_code=502, detail=f"Responses stream error: {e}") from e
 
     async def _forward_to_llm_openai(self, body: dict[str, Any]) -> dict[str, Any]:
-        """Forward to an OpenAI-compatible API."""
-        import httpx
+        """Forward chat requests with an ordered, credential-isolated fallback list."""
+        from .chat_upstream import forward_chat
 
-        api_base = self.config.llm_api_base.rstrip("/")
-        if not api_base:
-            raise HTTPException(
-                status_code=503,
-                detail="llm_api_base is not configured. Run 'skillclaw setup' first.",
-            )
+        async def collect_stream(response, model):
+            events = await _collect_sse_chat_events(response)
+            return _assemble_streaming_chat_completion(events, fallback_model=model)
 
-        # Strip Tinker-specific fields not supported by standard OpenAI APIs
-        send_body = {k: v for k, v in body.items() if k not in {"logprobs", "top_logprobs", "stream_options"}}
-        send_body["model"] = self.config.llm_model_id or body.get("model", "")
-        send_body["stream"] = False
-
-        headers: dict[str, str] = {}
-        if self.config.llm_api_key:
-            headers["Authorization"] = f"Bearer {self.config.llm_api_key}"
-
-        # OpenRouter-specific headers and body extensions
-        if self.config.llm_provider == "openrouter":
-            if self.config.openrouter_app_name:
-                headers["X-Title"] = self.config.openrouter_app_name
-            if self.config.openrouter_app_url:
-                headers["HTTP-Referer"] = self.config.openrouter_app_url
-            # Routing strategy
-            route = self.config.openrouter_route
-            if route and route != "fallback":
-                send_body["provider"] = {"sort": route}
-            # Fallback model list
-            fallback = self.config.openrouter_fallback_models
-            if fallback:
-                models = [m.strip() for m in fallback.split(",") if m.strip()]
-                if models:
-                    send_body["models"] = [send_body.get("model", "")] + models
-            # Data collection policy
-            if self.config.openrouter_data_policy == "deny":
-                send_body.setdefault("provider", {})
-                send_body["provider"]["data_collection"] = "deny"
-
-        max_retries = 6
-        for attempt in range(max_retries):
-            try:
-                async with httpx.AsyncClient(timeout=_llm_request_timeout_seconds()) as client:
-                    resp = await client.post(
-                        f"{api_base}/chat/completions",
-                        json=send_body,
-                        headers=headers,
-                    )
-                    resp.raise_for_status()
-                    return resp.json()
-            except httpx.HTTPStatusError as e:
-                response_text = e.response.text[:200]
-                if e.response.status_code == 400 and "'temperature' is not supported" in e.response.text:
-                    logger.info("[OpenClaw] upstream rejects temperature param, retrying without it")
-                    send_body.pop("temperature", None)
-                    continue
-                if e.response.status_code == 400 and "Stream must be set to true" in e.response.text:
-                    logger.info("[OpenClaw] upstream requires stream=true, retrying with SSE collection")
-                    stream_body = dict(send_body)
-                    stream_body["stream"] = True
-                    try:
-                        async with httpx.AsyncClient(timeout=_llm_request_timeout_seconds()) as client:
-                            async with client.stream(
-                                "POST",
-                                f"{api_base}/chat/completions",
-                                json=stream_body,
-                                headers=headers,
-                            ) as stream_resp:
-                                stream_resp.raise_for_status()
-                                events = await _collect_sse_chat_events(stream_resp)
-                        return _assemble_streaming_chat_completion(
-                            events,
-                            fallback_model=send_body.get("model", ""),
-                        )
-                    except httpx.HTTPStatusError as stream_error:
-                        logger.error(
-                            "[OpenClaw] upstream SSE retry error: %s %s",
-                            stream_error.response.status_code,
-                            stream_error.response.text[:200],
-                        )
-                        raise HTTPException(
-                            status_code=502,
-                            detail=f"Upstream LLM SSE retry error: {stream_error}",
-                        ) from stream_error
-                    except Exception as stream_error:
-                        logger.error("[OpenClaw] upstream SSE retry failed: %s", stream_error, exc_info=True)
-                        raise HTTPException(
-                            status_code=502,
-                            detail=f"Upstream LLM SSE retry failed: {stream_error}",
-                        ) from stream_error
-                # Retryable upstream error — retry if attempts remain
-                if attempt < max_retries - 1:
-                    wait = min(2**attempt + random.uniform(0, 1), 30)
-                    logger.warning(
-                        "[OpenClaw] upstream LLM error (attempt %d/%d), retrying in %.1fs: %s %s",
-                        attempt + 1,
-                        max_retries,
-                        wait,
-                        e.response.status_code,
-                        response_text,
-                    )
-                    await asyncio.sleep(wait)
-                    continue
-                logger.error("[OpenClaw] upstream LLM error: %s %s", e.response.status_code, response_text)
-                raise HTTPException(status_code=502, detail=f"Upstream LLM error: {e}") from e
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    wait = min(2**attempt + random.uniform(0, 1), 30)
-                    logger.warning(
-                        "[OpenClaw] LLM forward failed (attempt %d/%d), retrying in %.1fs: %s",
-                        attempt + 1,
-                        max_retries,
-                        wait,
-                        e,
-                    )
-                    await asyncio.sleep(wait)
-                    continue
-                logger.error("[OpenClaw] LLM forward failed: %s", e, exc_info=True)
-                raise HTTPException(status_code=502, detail=f"LLM forward error: {e}") from e
+        return await forward_chat(
+            self.config,
+            body,
+            timeout=_llm_request_timeout_seconds(),
+            collect_stream=collect_stream,
+        )
 
     async def _forward_to_llm_bedrock(self, body: dict[str, Any]) -> dict[str, Any]:
         """Forward to AWS Bedrock via BedrockChatClient."""

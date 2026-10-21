@@ -99,6 +99,7 @@ class EvolveServerConfig:
     use_success_feedback: bool = True
 
     # Evolution
+    evidence_max_age_seconds: int = 0
     evolve_batch_size: int = 20
     reject_rewrite: bool = False  # Reject skill improvements that look like full rewrites
     use_session_judge: bool = True
@@ -142,6 +143,9 @@ class EvolveServerConfig:
     agents_md_path: str = ""
 
     def __post_init__(self) -> None:
+        self.evidence_max_age_seconds = int(self.evidence_max_age_seconds)
+        if self.evidence_max_age_seconds < 0:
+            raise ValueError("EVOLVE_EVIDENCE_MAX_AGE_SECONDS must be non-negative")
         self.engine = str(self.engine or "workflow").strip().lower() or "workflow"
         self.skill_verifier_min_score = max(
             0.0,
@@ -235,6 +239,7 @@ class EvolveServerConfig:
             llm_api_type=llm_api_type,
             evolve_strategy=os.environ.get("EVOLVE_STRATEGY", "dynamic_edit_conservative"),
             use_success_feedback=os.environ.get("EVOLVE_USE_SUCCESS_FEEDBACK", "1").lower() not in {"0", "false", "no"},
+            evidence_max_age_seconds=int(os.environ.get("EVOLVE_EVIDENCE_MAX_AGE_SECONDS", "0")),
             evolve_batch_size=int(os.environ.get("EVOLVE_BATCH_SIZE", "20")),
             reject_rewrite=os.environ.get("EVOLVE_REJECT_REWRITE", "0").lower() in {"1", "true", "yes"},
             use_session_judge=os.environ.get("EVOLVE_USE_SESSION_JUDGE", "1").lower() not in {"0", "false", "no"},
@@ -352,6 +357,7 @@ class EvolveServerConfig:
             llm_api_type=llm_api_type,
             evolve_strategy=os.environ.get("EVOLVE_STRATEGY", "dynamic_edit_conservative"),
             use_success_feedback=os.environ.get("EVOLVE_USE_SUCCESS_FEEDBACK", "1").lower() not in {"0", "false", "no"},
+            evidence_max_age_seconds=int(os.environ.get("EVOLVE_EVIDENCE_MAX_AGE_SECONDS", "0")),
             evolve_batch_size=int(os.environ.get("EVOLVE_BATCH_SIZE", "20")),
             reject_rewrite=os.environ.get("EVOLVE_REJECT_REWRITE", "0").lower() in {"1", "true", "yes"},
             use_session_judge=os.environ.get("EVOLVE_USE_SESSION_JUDGE", "1").lower() not in {"0", "false", "no"},

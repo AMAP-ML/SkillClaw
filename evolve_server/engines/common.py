@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 from skillclaw.object_store import build_object_store
@@ -17,6 +18,20 @@ from ..storage.mock_bucket import LocalBucket
 from ..storage.oss_helpers import list_session_keys, load_manifest, read_json_object
 
 logger = logging.getLogger(__name__)
+
+
+def _fresh_session_evidence(session: dict, now: datetime, max_age: int) -> bool:
+    timestamp = session.get("timestamp") if isinstance(session, dict) else None
+    if not isinstance(timestamp, str):
+        return False
+    try:
+        stamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            return False
+        age = (now - stamp).total_seconds()
+        return 0 <= age <= max_age
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 
 class EvolveEngineMixin:
@@ -85,11 +100,23 @@ class EvolveEngineMixin:
         keys = await self._call_storage(list_session_keys, self._bucket, self._prefix)
         sessions: list[dict] = []
         consumed_keys: list[str] = []
+        max_age = self.config.evidence_max_age_seconds
+        now = datetime.now(timezone.utc)
+        excluded = 0
         for key in keys:
             session = await self._call_storage(read_json_object, self._bucket, key)
             if session:
+                if max_age and not _fresh_session_evidence(session, now, max_age):
+                    excluded += 1
+                    continue
                 sessions.append(session)
                 consumed_keys.append(key)
+        if excluded:
+            logger.warning(
+                "[%s] excluded %d stale/undated/future session(s); retained in storage for review",
+                type(self).__name__,
+                excluded,
+            )
         logger.info(
             "[%s] drained %d session(s) (%d keys found)",
             type(self).__name__,

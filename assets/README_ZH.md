@@ -529,6 +529,7 @@ skillclaw skills list-remote   # 查看远端技能
 **配置参考**
 
 - Client 配置：`~/.skillclaw/config.yaml`（由 `skillclaw setup` 生成）
+- Evidence 时间窗：在 evolver 设置 `EVOLVE_EVIDENCE_MAX_AGE_SECONDS`（如 `604800` 表示七天；默认 `0` 关闭过滤）。两个引擎都会排除过期、未来、缺失或无效时间戳，并保留原对象供人工核查。当前依据文件上传时间，不是原始回合时间；不使已有技能过期，也不保证效果单调提升。
 - 服务端模板：[`evolve_server/evolve_server.env.example`](../evolve_server/evolve_server.env.example)（复制为 `.env` 使用）
 - 查看 / 修改配置：`skillclaw config show` ｜ `skillclaw config <key> <value>`
 - 贡献者入口：`skillclaw/`（客户端）、`evolve_server/`（后端）、`scripts/`（安装脚本）

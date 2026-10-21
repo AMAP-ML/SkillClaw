@@ -14,8 +14,9 @@ from typing import Any
 from .chat_upstream import validate_fallbacks
 from .config import SkillClawConfig
 from .hermes_config import resolve_hermes_config
+from .paths import has_instance_home, skillclaw_home
 
-CONFIG_DIR = Path.home() / ".skillclaw"
+CONFIG_DIR = skillclaw_home()
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
 _DEFAULT_SKILLS_DIR = CONFIG_DIR / "skills"
 _DEFAULT_HERMES_SKILLS_DIR = Path.home() / ".hermes" / "skills"
@@ -39,7 +40,7 @@ def _resolve_config_file(config_file: Path | None = None) -> Path:
     if env_config_file:
         return Path(env_config_file).expanduser()
 
-    return CONFIG_FILE
+    return skillclaw_home() / "config.yaml" if has_instance_home() else CONFIG_FILE
 
 
 _DEFAULTS: dict = {
@@ -211,6 +212,8 @@ def _normalize_reload_interval(value: Any) -> int:
 def default_skills_dir_for_claw(claw_type: str, hermes_config_path: str = "") -> Path:
     """Return the default local skills directory for the selected agent."""
     normalized = str(claw_type or "").strip().lower()
+    if has_instance_home():
+        return skillclaw_home() / "skills"
     if normalized == "hermes":
         return resolve_hermes_config(hermes_config_path).parent / "skills"
     if normalized == "codex":
@@ -275,16 +278,28 @@ class ConfigStore:
         return self.config_file.exists()
 
     def load(self) -> dict:
+        defaults = _deep_merge({}, _DEFAULTS)
+        if has_instance_home():
+            root = skillclaw_home()
+            defaults = _deep_merge(
+                defaults,
+                {
+                    "claw_type": "none",
+                    "skills": {"dir": str(root / "skills")},
+                    "record": {"dir": str(root / "records")},
+                    "dashboard": {"db_path": str(root / "dashboard.db")},
+                },
+            )
         if not self.config_file.exists():
-            return _deep_merge({}, _DEFAULTS)
+            return defaults
         try:
             import yaml
 
             with open(self.config_file, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
-            return _deep_merge(_DEFAULTS, data)
+            return _deep_merge(defaults, data)
         except Exception:
-            return _deep_merge({}, _DEFAULTS)
+            return defaults
 
     def save(self, data: dict):
         import yaml

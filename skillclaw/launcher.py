@@ -17,10 +17,9 @@ from pathlib import Path
 from typing import Optional
 
 from .config_store import ConfigStore
+from .runtime_state import pid_file_path
 
 logger = logging.getLogger(__name__)
-
-_PID_FILE = Path.home() / ".skillclaw" / "skillclaw.pid"
 
 
 class SkillClawLauncher:
@@ -28,6 +27,7 @@ class SkillClawLauncher:
 
     def __init__(self, config_store: ConfigStore):
         self.cs = config_store
+        self._pid_file = pid_file_path()
         self._api_server = None
         self._stop_event = threading.Event()
         self._validation_worker = None
@@ -56,7 +56,7 @@ class SkillClawLauncher:
                 self._api_server.stop()
             except Exception:
                 pass
-        _PID_FILE.unlink(missing_ok=True)
+        self._pid_file.unlink(missing_ok=True)
 
     # ------------------------------------------------------------------ #
     # Core startup                                                         #
@@ -202,8 +202,8 @@ class SkillClawLauncher:
     # ------------------------------------------------------------------ #
 
     def _write_pid(self):
-        _PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _PID_FILE.write_text(str(os.getpid()))
+        self._pid_file.parent.mkdir(parents=True, exist_ok=True)
+        self._pid_file.write_text(str(os.getpid()))
 
     def _setup_signal_handlers(self):
         def _handler(signum, frame):

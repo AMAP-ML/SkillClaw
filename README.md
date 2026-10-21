@@ -557,6 +557,10 @@ Streaming requires structured OpenAI tool calls; textual tool-tag repair is avai
 
 ## Quick Reference
 
+For one proxy per worktree, set an absolute `SKILLCLAW_HOME` before every CLI invocation (for example, `export SKILLCLAW_HOME="$HOME/.skillclaw-instances/project-main"`). Then run setup and choose a distinct proxy port. A different home isolates config, PID/lock, default log, records/cache, skills, dashboard DB and adapter backups. `SKILLCLAW_CONFIG_FILE` still overrides just the config-file location; explicit data paths remain unchanged.
+
+A new instance home defaults to `claw_type: none`: configure each client/profile manually for its instance port. Agent configuration files themselves are external to the instance home and are not automatically isolated. Use distinct absolute `skills.dir` paths when selecting worktree libraries, and distinct sharing groups/roots or credentials if evolution evidence must stay separate. `group_id` alone is not an access-control boundary. Keep the same home when running `status` or `stop`; changing only the config-file variable does not isolate runtime state.
+
 **Operational model** — Every user has their own `skillclaw` process and `~/.skillclaw/config.yaml`. Each group maps to a `group_id`; one evolve server watches that namespace, turns sessions into skills, and writes them back. Joining a group only requires the correct sharing config on the client side.
 
 **First-run checks**

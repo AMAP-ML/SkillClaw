@@ -25,11 +25,12 @@ except ImportError:
     sys.exit(1)
 
 from . import runtime_state
-from .config_store import CONFIG_FILE, ConfigStore
+from .config_store import ConfigStore
+from .paths import skillclaw_home
 
 
 def _default_daemon_log_path() -> Path:
-    return Path.home() / ".skillclaw" / "skillclaw.log"
+    return skillclaw_home() / "skillclaw.log"
 
 
 def _effective_proxy_port(config_store: ConfigStore, override_port: int | None) -> int:
@@ -330,9 +331,8 @@ def stop():
     """Stop a running SkillClaw instance."""
     import os
     import signal
-    from pathlib import Path
 
-    pid_file = Path.home() / ".skillclaw" / "skillclaw.pid"
+    pid_file = runtime_state.pid_file_path()
     if not pid_file.exists():
         click.echo("SkillClaw is not running (no PID file found).")
         return
@@ -386,7 +386,7 @@ def config_cmd(key_or_action: str, value: str | None):
         if not cs.exists():
             click.echo("No config file found. Run 'skillclaw setup' first.")
             return
-        click.echo(f"Config file: {CONFIG_FILE}\n")
+        click.echo(f"Config file: {cs.config_file}\n")
         click.echo(cs.describe())
         return
 

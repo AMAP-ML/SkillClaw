@@ -507,6 +507,10 @@ OpenAI-compatible `/v1/chat/completions` 的 `stream: true` 现在会实时转�
 
 ## 快速参考
 
+每个 worktree 使用一个代理时，在每次 CLI 调用前设置绝对路径 `SKILLCLAW_HOME`，例如 `export SKILLCLAW_HOME="$HOME/.skillclaw-instances/project-main"`，再执行 setup 并选择独立端口。不同 home 会隔离配置、PID/锁、默认日志、记录/缓存、skills、dashboard 数据库和 adapter 备份。`SKILLCLAW_CONFIG_FILE` 仍优先指定配置文件；已有显式数据路径不会被改写。
+
+新的实例 home 默认选择 `claw_type: none`，请手动让各客户端/profile 使用对应代理端口；agent 自身的配置文件不在实例目录里，不会自动隔离。选择 worktree 技能目录时使用不同的绝对 `skills.dir`；需要分离演化证据时，还应设置不同共享组/根目录或凭据，`group_id` 本身不是权限边界。`status`、`stop` 必须使用同一个 home，仅切换配置文件变量不足以隔离运行状态。
+
 **运行关系** — 每个用户有自己的 `skillclaw` 进程和 `~/.skillclaw/config.yaml`；每个群组对应一个 `group_id`，由一个 Evolver 持续读取会话、产出技能、写回存储。加入群组只需正确配置共享存储，无需部署服务端。
 
 **首次启动检查**

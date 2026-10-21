@@ -10,6 +10,7 @@ from pathlib import Path
 from .claw_adapter import CLAW_TYPES
 from .config_store import CONFIG_DIR, ConfigStore, default_llm_api_mode_for_claw, resolve_skills_dir
 from .hermes_config import import_hermes_upstream, resolve_hermes_config
+from .paths import has_instance_home
 
 _PROVIDER_PRESETS = {
     "kimi": {
@@ -126,7 +127,7 @@ class SetupWizard:
         print("\n" + "=" * 60)
         print("  SkillClaw Setup")
         print("=" * 60)
-        print("\nThis wizard will create ~/.skillclaw/config.yaml")
+        print(f"\nThis wizard will create {ConfigStore().config_file}")
         print("You can re-run 'skillclaw setup' at any time to reconfigure.\n")
 
         cs = ConfigStore()
@@ -135,7 +136,7 @@ class SetupWizard:
         # ---- CLI agent (claw type) ----
         print("\n--- CLI Agent ---")
         print("SkillClaw will auto-configure the chosen agent to route its LLM\ncalls through the SkillClaw proxy.")
-        current_claw = existing.get("claw_type", "openclaw")
+        current_claw = existing.get("claw_type", "none" if has_instance_home() else "openclaw")
         claw_type = _prompt_choice(
             "CLI agent to configure",
             CLAW_TYPES,

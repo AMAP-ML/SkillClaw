@@ -5,6 +5,8 @@ Unified configuration for SkillClaw.
 
 from dataclasses import dataclass, field
 
+from .paths import has_instance_home, skillclaw_home
+
 
 @dataclass
 class SkillClawConfig:
@@ -29,7 +31,9 @@ class SkillClawConfig:
     # Skills                                                              #
     # ------------------------------------------------------------------ #
     use_skills: bool = False
-    skills_dir: str = "memory_data/skills"
+    skills_dir: str = field(
+        default_factory=lambda: str(skillclaw_home() / "skills") if has_instance_home() else "memory_data/skills"
+    )
     skills_public_root: str = ""
     retrieval_mode: str = "template"
     # Embedding configuration: "local" for SentenceTransformer, "api" for OpenAI-compatible APIs
@@ -55,7 +59,9 @@ class SkillClawConfig:
     served_model_name: str = "skillclaw-model"
     proxy_api_key: str = ""
     record_enabled: bool = True
-    record_dir: str = "records/"
+    record_dir: str = field(
+        default_factory=lambda: str(skillclaw_home() / "records") if has_instance_home() else "records/"
+    )
 
     # Which CLI agent to auto-configure on startup.
     claw_type: str = "openclaw"
@@ -145,7 +151,7 @@ class SkillClawConfig:
     dashboard_enabled: bool = False
     dashboard_host: str = "127.0.0.1"
     dashboard_port: int = 3788
-    dashboard_db_path: str = "~/.skillclaw/dashboard.db"
+    dashboard_db_path: str = field(default_factory=lambda: str(skillclaw_home() / "dashboard.db"))
     dashboard_sync_on_start: bool = True
     dashboard_include_shared: bool = True
     dashboard_evolve_server_url: str = ""

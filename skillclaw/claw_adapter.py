@@ -37,28 +37,29 @@ from typing import TYPE_CHECKING, Callable
 import yaml
 
 from .hermes_config import load_hermes_mapping, resolve_hermes_config
+from .paths import skillclaw_home
 
 if TYPE_CHECKING:
     from .config import SkillClawConfig
 
 logger = logging.getLogger(__name__)
-_LEGACY_SKILLCLAW_SKILLS_DIR = Path.home() / ".skillclaw" / "skills"
+_LEGACY_SKILLCLAW_SKILLS_DIR = skillclaw_home() / "skills"
 _HERMES_HOME = Path.home() / ".hermes"
 _HERMES_SKILLS_DIR = _HERMES_HOME / "skills"
-_HERMES_BACKUP_DIR = Path.home() / ".skillclaw" / "backups" / "hermes"
+_HERMES_BACKUP_DIR = skillclaw_home() / "backups" / "hermes"
 _CODEX_HOME = Path.home() / ".codex"
 _CODEX_CONFIG_PATH = _CODEX_HOME / "config.toml"
 _CODEX_PROFILE_CONFIG_PATH = _CODEX_HOME / "skillclaw.config.toml"
 _CODEX_SKILLS_DIR = _CODEX_HOME / "skills"
-_CODEX_BACKUP_DIR = Path.home() / ".skillclaw" / "backups" / "codex"
+_CODEX_BACKUP_DIR = skillclaw_home() / "backups" / "codex"
 _CLAUDE_HOME = Path.home() / ".claude"
 _CLAUDE_SETTINGS_PATH = _CLAUDE_HOME / "settings.json"
 _CLAUDE_SKILLS_DIR = _CLAUDE_HOME / "skills"
-_CLAUDE_BACKUP_DIR = Path.home() / ".skillclaw" / "backups" / "claude"
+_CLAUDE_BACKUP_DIR = skillclaw_home() / "backups" / "claude"
 _OPENCODE_CONFIG_DIR = Path.home() / ".config" / "opencode"
 _OPENCODE_CONFIG_PATH = _OPENCODE_CONFIG_DIR / "opencode.json"
 _OPENCODE_SKILLS_DIR = _OPENCODE_CONFIG_DIR / "skills"
-_OPENCODE_BACKUP_DIR = Path.home() / ".skillclaw" / "backups" / "opencode"
+_OPENCODE_BACKUP_DIR = skillclaw_home() / "backups" / "opencode"
 
 
 # ------------------------------------------------------------------ #

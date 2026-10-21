@@ -8,9 +8,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from .paths import skillclaw_home
+
 
 def _state_dir() -> Path:
-    return Path.home() / ".skillclaw"
+    return skillclaw_home()
 
 
 def pid_file_path() -> Path:

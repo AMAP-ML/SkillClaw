@@ -707,9 +707,11 @@ class SkillHub:
         staging_dir = os.path.join(parent_dir, f".skillclaw_pull_stage_{base_name}_{stamp}")
 
         try:
-            shutil.copytree(skills_dir, backup_dir)
+            shutil.copytree(skills_dir, backup_dir, symlinks=True)
         except Exception as e:
             logger.warning("[SkillHub] backup before pull failed: %s", e)
+            shutil.rmtree(backup_dir, ignore_errors=True)
+            self._prune_backups(backup_root, backup_prefix, keep=3)
             return _result(
                 downloaded=0,
                 skipped=0,
@@ -783,12 +785,12 @@ class SkillHub:
             try:
                 if os.path.isdir(skills_dir):
                     shutil.rmtree(skills_dir)
-                shutil.copytree(backup_dir, skills_dir)
+                shutil.copytree(backup_dir, skills_dir, symlinks=True)
                 restored_from_backup = True
                 logger.info("[SkillHub] local skills restored from backup: %s", backup_dir)
             except Exception as restore_err:
                 logger.error("[SkillHub] backup restore failed: %s", restore_err)
-
+            self._prune_backups(backup_root, backup_prefix, keep=3)
             return _result(
                 downloaded=0,
                 skipped=0,

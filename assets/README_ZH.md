@@ -465,6 +465,8 @@ Bob 使用相同配置，只把 `sharing.local_root` 改为 `/Volumes/skillclaw-
 2. 经本地代理使用 agent。会话结束后（默认空闲超时为 180 秒），确认共享目录的 `team-lan/sessions/` 中出现会话文件；evolver 可能在下一轮处理时将其取走。
 3. 查看服务器日志和 `evolve_history.jsonl`。是否产生技能更新取决于证据质量，并非每轮必然更新。接受的变化写入 `team-lan/skills/`，客户端轮询后拉取到本地。
 
+如果只想同步技能、不导出会话和工具内容，运行 `skillclaw config sharing.upload_sessions false` 并重启代理。周期快照和会话结束上传都会关闭（包括本地共享目录），技能推送/拉取仍可用。该开关不删除已共享文件、不关闭本地记录，也不阻止向推理服务发送请求。首次 setup 会明确询问，默认不上传；已有配置保持原来的上传行为，需主动修改。
+
 同组用户共享会话证据和生成的技能。`group_id` 只是命名空间，不是权限隔离；不同信任组应使用独立共享根目录和文件系统/共享访问权限。本例没有自动隐私脱敏。默认发布模式为 `direct`；若需先让客户端验证候选技能，请使用上文的 `validated` 流程。
 
 Cloudflare R2 应使用**账号级 endpoint**，例如 `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`，并配置 `sharing.backend s3`、`sharing.bucket <bucket-name>`、`sharing.region auto`。不要把 bucket 拼到 `sharing.endpoint` 后面；boto3 会单独发送 bucket。SkillClaw 会在访问存储前拒绝这种错误配置。参见 [R2 S3 API 文档](https://developers.cloudflare.com/r2/api/s3/api/)。

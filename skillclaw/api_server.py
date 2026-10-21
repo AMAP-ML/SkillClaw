@@ -2117,7 +2117,7 @@ class SkillClawAPIServer:
                 self.skill_manager._save_stats()
             turns = self._session_turns.pop(session_id, [])
             modified_skill_names = _extract_modified_skill_names(turns)
-            if turns and self.config.sharing_enabled:
+            if turns and self.config.sharing_enabled and self.config.sharing_upload_sessions:
                 self._safe_create_task(self._upload_session_data(session_id, turns))
             if self.config.sharing_enabled:
                 self._safe_create_task(self._pull_skills_from_cloud(skip_names=modified_skill_names))
@@ -2952,6 +2952,8 @@ class SkillClawAPIServer:
           - sessions: ``{group_id}/sessions/{session_id}.jsonl``
           - skills:   ``{group_id}/skills/{name}/SKILL.md``  (handled by SkillHub)
         """
+        if not self.config.sharing_enabled or not self.config.sharing_upload_sessions:
+            return False
         try:
             from .skill_hub import SkillHub
 
@@ -2996,7 +2998,7 @@ class SkillClawAPIServer:
     def _maybe_upload_session_snapshot(self, session_id: str, user_turn_num: int) -> None:
         """Queue a session snapshot when the user-visible turn cadence is reached."""
         interval = max(0, int(getattr(self.config, "sharing_session_upload_interval", 0) or 0))
-        if not self.config.sharing_enabled or interval <= 0:
+        if not self.config.sharing_enabled or not self.config.sharing_upload_sessions or interval <= 0:
             return
         if user_turn_num <= 0 or user_turn_num % interval != 0:
             return

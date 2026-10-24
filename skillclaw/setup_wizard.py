@@ -27,7 +27,8 @@ _PROVIDER_PRESETS = {
     },
     "minimax": {
         "api_base": "https://api.minimax.io/v1",
-        "model_id": "MiniMax-M3",
+        "model_id": "MiniMax-M3.1-Flash",
+        "model_ids": ["MiniMax-M3.1-Flash", "MiniMax-M3"],
         "regions": {
             "global_en": "https://api.minimax.io/v1",
             "cn_zh": "https://api.minimaxi.com/v1",
@@ -209,6 +210,8 @@ class SetupWizard:
                 "API base URL [http://api.example.com/v1]",
                 default=default_api_base,
             )
+            if preset.get("model_ids"):
+                print(f"Available models: {', '.join(preset['model_ids'])}")
             model_id = _prompt(
                 "Model ID",
                 default=(current_llm.get("model_id") if provider_unchanged else "") or preset["model_id"],

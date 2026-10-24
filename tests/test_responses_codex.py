@@ -120,6 +120,11 @@ def test_codex_responses_multimodal_image_input_converts_to_openai_chat_content_
         }
     ]
 
+def test_codex_responses_minimax_video_input_converts_to_openai_chat_content_parts():
+    body = {"model":"MiniMax-M3","input":[{"type":"message","role":"user","content":[{"type":"input_video","video_url":"https://example.test/video.mp4"}]}]}
+    converted = openai_responses.to_openai_body(body, "fallback-model")
+    assert converted["messages"][0]["content"] == [{"type":"video_url","video_url":{"url":"https://example.test/video.mp4"}}]
+
 
 def test_codex_responses_skill_function_call_and_output_convert_to_chat_tool_roundtrip():
     body = {

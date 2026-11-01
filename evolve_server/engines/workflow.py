@@ -37,6 +37,7 @@ from ..pipeline.execution import (
 from ..pipeline.session_judge import judge_sessions_parallel
 from ..pipeline.skill_verifier import verify_skill_candidate
 from ..pipeline.summarizer import set_summarizer_debug_dir, summarize_sessions_parallel
+from ..storage.mock_bucket import _DEFAULT_LOCAL_DIR
 from ..storage.oss_helpers import (
     delete_session_keys,
     fetch_skill_content,
@@ -70,15 +71,25 @@ class EvolveServer(EvolveEngineMixin):
             max_tokens=config.llm_max_tokens,
             temperature=config.llm_temperature,
         )
+        validation_backend = self.config.storage_backend
+        validation_local_root = self.config.local_root
+        if mock:
+            # Mock mode: the main bucket ignores the configured backend and
+            # serves from a local directory (see _build_bucket), so the
+            # validation store must do the same. In a pure --mock run the
+            # configured backend is unset, and passing it through makes
+            # build_object_store raise "Unsupported storage backend: ''".
+            validation_backend = "local"
+            validation_local_root = mock_root or str(_DEFAULT_LOCAL_DIR)
         self._validation_store = ValidationStore(
-            backend=self.config.storage_backend,
+            backend=validation_backend,
             endpoint=self.config.storage_endpoint,
             bucket=self.config.storage_bucket,
             access_key_id=self.config.storage_access_key_id,
             secret_access_key=self.config.storage_secret_access_key,
             region=self.config.storage_region,
             session_token=self.config.storage_session_token,
-            local_root=self.config.local_root,
+            local_root=validation_local_root,
             group_id=self.config.group_id,
         )
         self._id_registry = SkillIDRegistry()

@@ -395,7 +395,7 @@ async def summarize_session(llm: AsyncLLMClient, session: dict) -> str:
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
     ]
     try:
-        return await llm.chat(messages, max_tokens=100000, temperature=0.2)
+        return await llm.chat(messages, max_tokens=min(int(getattr(llm, "max_tokens", 8192) or 8192), 8192), temperature=0.2)
     except Exception as e:
         logger.warning(
             "[Summarizer] LLM call failed for session %s: %s",

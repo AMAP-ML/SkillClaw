@@ -45,6 +45,10 @@ _PROVIDER_PRESETS = {
         "api_base": "https://api.atlascloud.ai/v1",
         "model_id": "deepseek-ai/DeepSeek-V3.1",
     },
+    "runcrate": {
+        "api_base": "https://api.runcrate.ai/v1",
+        "model_id": "deepseek-ai/DeepSeek-V4.1-Flash",
+    },
     "bedrock": {
         "api_base": "",
         "model_id": "us.anthropic.claude-sonnet-4-6",
@@ -54,9 +58,21 @@ _PROVIDER_PRESETS = {
         "model_id": "",
     },
 }
-_PROVIDER_CHOICES = ["kimi", "qwen", "openai", "minimax", "novita", "openrouter", "atlascloud", "bedrock", "custom"]
+_PROVIDER_CHOICES = [
+    "kimi",
+    "qwen",
+    "openai",
+    "minimax",
+    "novita",
+    "openrouter",
+    "atlascloud",
+    "runcrate",
+    "bedrock",
+    "custom",
+]
 _PROVIDER_DEFAULT_API_MODE = {
     "atlascloud": "chat",
+    "runcrate": "chat",
 }
 
 

@@ -18,6 +18,11 @@ export OPENAI_API_KEY="your-openai-api-key"
 # export OPENAI_BASE_URL="https://api.atlascloud.ai/v1"
 # export OPENAI_API_KEY="$ATLASCLOUD_API_KEY"
 
+# Runcrate can be used as an OpenAI-compatible upstream for open-weight models:
+# export RUNCRATE_API_KEY="your-runcrate-api-key"
+# export OPENAI_BASE_URL="https://api.runcrate.ai/v1"
+# export OPENAI_API_KEY="$RUNCRATE_API_KEY"
+
 # Convenience values for shared-skill setup discussions or local wrappers.
 export OSS_ENDPOINT="https://oss-cn-hangzhou.aliyuncs.com"
 export OSS_BUCKET="skillclaw-shared-skills"

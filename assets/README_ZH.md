@@ -211,6 +211,8 @@ skillclaw setup
 
 如果你使用 Atlas Cloud 作为上游 OpenAI 兼容 provider，可以选择 `atlascloud`，保留默认 API base `https://api.atlascloud.ai/v1`，并在提示时输入你的 Atlas Cloud API key。该预设默认走 chat-compatible 转发，因此 Codex 客户端也可以通过 SkillClaw 的 Responses-to-chat 桥接使用。
 
+如果你使用 Runcrate 的开源权重模型，可以选择 `runcrate`，保留默认 API base `https://api.runcrate.ai/v1`，并在提示时输入你的 Runcrate API key。默认模型为 `deepseek-ai/DeepSeek-V4.1-Flash`，该预设同样走 chat-compatible 转发。
+
 第一次最小化验证时，推荐这样选：
 
 - `CLI agent` 选 `none`，先不要自动改外部 agent 配置

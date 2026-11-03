@@ -212,6 +212,8 @@ The setup wizard prompts for the provider, model, local skills directory, PRM se
 
 If you use Atlas Cloud as the upstream OpenAI-compatible provider, choose `atlascloud`, keep the default API base `https://api.atlascloud.ai/v1`, and enter your Atlas Cloud API key when prompted. The preset uses chat-compatible forwarding so Codex clients can use SkillClaw's Responses-to-chat bridge.
 
+If you use Runcrate for open-weight models, choose `runcrate`, keep the default API base `https://api.runcrate.ai/v1`, and enter your Runcrate API key when prompted. The default model is `deepseek-ai/DeepSeek-V4.1-Flash`, and the preset also uses chat-compatible forwarding.
+
 For a minimal first run:
 
 - choose `none` for the CLI agent if you do not want SkillClaw to auto-configure an external agent yet

@@ -20,12 +20,15 @@ _SKILL_RELOAD_MODES = {"off", "poll", "callback"}
 
 
 def _load_dotenv() -> None:
-    """Best-effort load of the ``.env`` next to this file."""
+    """Best-effort load of the package-root ``.env`` file.
+
+    @returns None
+    """
     try:
         from dotenv import load_dotenv
     except ImportError:
         return
-    env_path = Path(__file__).resolve().parent / ".env"
+    env_path = Path(__file__).resolve().parent.parent / ".env"
     if env_path.is_file():
         load_dotenv(env_path, override=False)
 
